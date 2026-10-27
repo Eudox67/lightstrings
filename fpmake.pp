@@ -28,18 +28,22 @@ begin
     P.OSes := [linux, win32, win64, darwin];
     P.CPUs := [x86_64, i386, aarch64];
 
-    // SourcePath locates the files named in AddUnit; UnitPath feeds -Fu.
+    // SourcePath locates the files named in AddUnit; UnitPath feeds -Fu
+    // and IncludePath feeds -Fi for the shared *.inc files.
     P.SourcePath.Add('src');
     P.UnitPath.Add('src');
+    P.IncludePath.Add('src');
 
-    // The units carry their own {$mode objfpc}, but stating it keeps the
+    // The units declare {$mode objfpc} themselves; stating it keeps the
     // package build identical to a hand-written fpc invocation.
     P.Options.Add('-Mobjfpc');
 
     // fpmkunit injects an implicit dependency on the "rtl" package, which
-    // needs a per-package unit-config file (<unitdir>/rtl/rtl.fpc) that many
-    // FPC installs do not ship. The compiler always knows where its own RTL
-    // lives, so the dependency is dropped and no package resolution happens.
+    // needs a per-package unit-config file (<unitdir>/rtl/rtl.fpc) that
+    // many FPC installs do not ship; the lookup then aborts with
+    //   Could not find unit directory for dependency package "rtl"
+    // The compiler already knows where its own RTL is, so the dependency
+    // is dropped and this package needs no external resolution.
     P.Dependencies.Clear;
 
     P.Targets.AddUnit('LightStrings.pas');
