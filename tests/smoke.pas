@@ -1,3 +1,9 @@
+// ###########################################################
+// #### LightStrings - stack-based string handling for Free Pascal
+// ####
+// #### Copyright 2026 Eudox67. All rights reserved.
+// #### Licensed under the MIT License - see LICENSE.
+// ###########################################################
 program smoke;
 
 {$mode objfpc}{$H+}

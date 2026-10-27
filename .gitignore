@@ -19,8 +19,11 @@
 /fpmake
 /fpmake.o
 /lightstrings-*.fpm
-# `lazbuild lightstrings_pkg.lpk` writes the package unit next to the .lpk
+# `lazbuild lightstrings_pkg.lpk` writes the package unit next to the .lpk.
+# The second pattern is defensive: it catches a stale `lightstrings.pas` stub
+# left behind by an older, colliding package name (see README).
 /lightstrings_pkg.pas
+/lightstrings.pas
 
 # Compiled test/benchmark programs (keep the .pas sources!)
 /tests/smoke
