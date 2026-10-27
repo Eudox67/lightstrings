@@ -29,6 +29,7 @@
 /tests/smoke
 /tests/regression
 /tests/test_benchmark
+/tests/testrunner
 
 # Editor / IDE
 .vscode/
