@@ -50,8 +50,9 @@ function PrependIfMissing(const Str, Prefix: string): string;
 { Append Suffix if Str doesn't already end with it. }
 function AppendIfMissing(const Str, Suffix: string): string;
 
-{ Reverse a string. Handles UTF-8 by reversing byte-by-byte
-  (preserves multi-byte sequences intact without decoding). }
+{ Reverse a string. UTF-8 aware: code points are reversed, while the bytes of
+  each (multi-byte) sequence stay in their original order, so the result is
+  still valid UTF-8 for valid UTF-8 input. }
 function Reverse(const S: string): string;
 
 implementation
@@ -247,12 +248,26 @@ end;
 
 function Reverse(const S: string): string;
 var
-  L, i: NativeInt;
+  i, j, Start, Len, L: NativeInt;
 begin
   L := System.Length(S);
   SetLength(Result, L);
-  for i := 1 to L do
-    Result[i] := S[L - i + 1];
+  if L = 0 then Exit;
+
+  i := L;   { 1-based index of the last byte of the next code point to emit }
+  j := 1;
+  while i >= 1 do
+  begin
+    { Walk back over continuation bytes (10xxxxxx) to the leading byte. }
+    Start := i;
+    while (Start > 1) and ((Ord(S[Start]) and $C0) = $80) do
+      Dec(Start);
+
+    Len := i - Start + 1;
+    Move(PChar(S)[Start - 1], PChar(Result)[j - 1], Len);
+    Inc(j, Len);
+    i := Start - 1;
+  end;
 end;
 
 end.

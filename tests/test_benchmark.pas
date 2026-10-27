@@ -48,6 +48,7 @@ end;
 function MakeNumberedStrings(N: NativeInt): TStrArray;
 var
   i, Part: NativeInt;
+  Tmp: string;
 begin
   SetLength(Result, N);
   for i := 0 to N - 1 do
@@ -55,10 +56,16 @@ begin
     Part := i div 100;
     Result[i] := 'item' + IntToStr(Part) + '_' + IntToStr(i mod 100);
   end;
+
+  { Fisher-Yates. The previous version copied Result[Part] into Result[i]
+    instead of swapping, which duplicated entries and lost others, so the
+    sorted input was not a permutation of the generated strings. }
   for i := N - 1 downto 1 do
   begin
     Part := Random(i + 1);
+    Tmp := Result[i];
     Result[i] := Result[Part];
+    Result[Part] := Tmp;
   end;
 end;
 
@@ -117,6 +124,10 @@ begin
   for i := 0 to N - 1 do
     SL.Add(Arr[i]);
   Result.StdMs := ElapsedMs(Start);
+
+  if LL.Count <> SL.Count then
+    WriteLn('  WARNING: add count mismatch (', LL.Count, ' vs ', SL.Count, ')');
+
   SL.Free;
 end;
 
@@ -153,6 +164,10 @@ begin
     Dummy := SL.IndexOf(Arr[N - 1]);
   Result.StdMs := ElapsedMs(Start);
 
+  { Validate outside the timed region: both containers must agree. }
+  if LL.IndexOf(Arr[N - 1]) <> SL.IndexOf(Arr[N - 1]) then
+    WriteLn('  WARNING: IndexOf disagrees with TStringList');
+
   SL.Free;
 end;
 
@@ -187,6 +202,19 @@ begin
   Start := GetTickCount64;
   SL.Sort;
   Result.StdMs := ElapsedMs(Start);
+
+  { Validate outside the timed region: same count, same order. Both input sets
+    are lowercase, so LightStrings' byte order and TStringList's CompareText
+    order coincide here - the timings still measure different comparators. }
+  if LL.Count <> SL.Count then
+    WriteLn('  WARNING: sort count mismatch (', LL.Count, ' vs ', SL.Count, ')')
+  else
+    for i := 0 to LL.Count - 1 do
+      if LL[i] <> SL[i] then
+      begin
+        WriteLn('  WARNING: sort content mismatch at index ', i);
+        Break;
+      end;
 
   SL.Free;
 end;
@@ -498,7 +526,7 @@ begin
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 3: Sort (2,000,000 items)... ');
+  Write('Benchmark 3: Sort (2,000,000 items; byte order vs CompareText)... ');
   S := BenchmarkSort(size);
   WriteLn(Format('LightStrings: %.1f ms | TStringList: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
   TotalLight += S.LightMs;

@@ -52,6 +52,7 @@ type
   private
     procedure QuickSort(var A: array of string; iLo, iHi: NativeInt);
     procedure NaturalQuickSort(var A: array of string; iLo, iHi: NativeInt);
+    function SortedInsertIndex(const S: string): NativeInt;
   public
     FItems: array of string;
     FCount: NativeInt;
@@ -276,19 +277,35 @@ end;
 
 class operator TBuildStr.Copy(constref Src: TBuildStr; var Dest: TBuildStr);
 begin
+  // FPC initializes the destination but does not finalize it before Copy, so
+  // an existing buffer would leak (and self-assignment would free the source).
+  if Dest.FBuffer = Src.FBuffer then Exit;
+  if Dest.FBuffer <> nil then
+    FreeMem(Dest.FBuffer);
+
   Dest.FLength := Src.FLength;
   Dest.FCapacity := Src.FCapacity;
+
   if Src.FBuffer <> nil then
   begin
     GetMem(Dest.FBuffer, Dest.FCapacity * SizeOf(Char));
-    Move(Src.FBuffer^, Dest.FBuffer^, Dest.FCapacity * SizeOf(Char));
+    if Dest.FLength > 0 then
+      Move(Src.FBuffer^, Dest.FBuffer^, Dest.FLength * SizeOf(Char));
   end
   else
+  begin
     Dest.FBuffer := nil;
+    Dest.FCapacity := 0;
+  end;
 end;
 
 procedure TBuildStr.Init(InitialCapacity: NativeInt);
 begin
+  // Init may be called on an already-used builder; release the old buffer or
+  // it leaks (Finalize only ever sees the last one).
+  if FBuffer <> nil then
+    FreeMem(FBuffer);
+
   FCapacity := InitialCapacity;
   if FCapacity <= 0 then FCapacity := 256;
   FLength := 0;
@@ -329,7 +346,8 @@ end;
 
 procedure TBuildStr.Chop(N: NativeInt);
 begin
-  if N > FLength then
+  if N <= 0 then Exit;
+  if N >= FLength then
     FLength := 0
   else
     Dec(FLength, N);
@@ -390,15 +408,48 @@ begin
   SetLength(FItems, InitialCapacity);
 end;
 
+function TStrList.SortedInsertIndex(const S: string): NativeInt;
+var
+  Lo, Hi, Mid: NativeInt;
+begin
+  Lo := 0;
+  Hi := FCount - 1;
+  while Lo <= Hi do
+  begin
+    Mid := (Lo + Hi) div 2;
+    if FItems[Mid] < S then
+      Lo := Mid + 1
+    else
+      Hi := Mid - 1;
+  end;
+  Result := Lo;
+end;
+
 procedure TStrList.Add(const S: string);
 var
-  CurrentCap: NativeInt;
+  Capacity, Index, i: NativeInt;
 begin
-  CurrentCap := System.Length(FItems);
-  if FCount >= CurrentCap then
-    SetLength(FItems, CurrentCap * 2);
+  Capacity := System.Length(FItems);
+  if Capacity = 0 then
+  begin
+    // A default-initialized record has no storage: grow from zero, not 0 * 2.
+    Capacity := 16;
+    SetLength(FItems, Capacity);
+  end
+  else if FCount >= Capacity then
+    SetLength(FItems, Capacity * 2);
 
-  FItems[FCount] := S;
+  if FSorted then
+  begin
+    // Keep the invariant Find depends on: a sorted list stays sorted.
+    Index := SortedInsertIndex(S);
+    for i := FCount downto Index + 1 do
+      FItems[i] := FItems[i - 1];
+  end
+  else
+    Index := FCount;
+
+  FItems[Index] := S;
   Inc(FCount);
 end;
 
@@ -487,9 +538,9 @@ begin
     S := FItems[i];
 
     if FStrictDelimiter then
-    begin
-      Builder.Append(QuoteStr(S, '"'));
-    end
+      // TStrings semantics: with a strict delimiter nothing is quoted (an
+      // item containing the delimiter therefore cannot round-trip).
+      Builder.Append(S)
     else
     begin
       if (System.Pos(FDelimiter, S) > 0) or
@@ -530,8 +581,11 @@ begin
       begin
         SetLength(Line, L);
         System.Move(Start^, Line[1], L * SizeOf(Char));
-        Self.Add(Line);
-      end;
+      end
+      else
+        Line := '';
+      // Blank lines are real items; dropping them loses data on a Text round-trip.
+      Self.Add(Line);
 
       if (P^ = #13) and (P[1] = #10) then Inc(P);
       Start := P + 1;
@@ -550,6 +604,9 @@ end;
 
 procedure TStrList.SetItem(Index: NativeInt; const Value: string);
 begin
+  // Changing an item in place can break the ordering Find relies on.
+  if FSorted and (FItems[Index] <> Value) then
+    FSorted := False;
   FItems[Index] := Value;
 end;
 
@@ -686,12 +743,17 @@ procedure TStrList.Sort;
 begin
   if FCount > 1 then
     QuickSort(FItems, 0, FCount - 1);
+  // The list is now in ascending order, which is what Find assumes.
+  FSorted := True;
 end;
 
 procedure TStrList.NaturalSort;
 begin
   if FCount > 1 then
     NaturalQuickSort(FItems, 0, FCount - 1);
+  // Natural order is not the byte order Find binary-searches for, so the
+  // sorted flag must not claim it is.
+  FSorted := False;
 end;
 
 procedure TStrList.Reverse;
@@ -709,6 +771,8 @@ begin
     Inc(i);
     Dec(j);
   end;
+  // Descending order is not the ordering Find relies on.
+  FSorted := False;
 end;
 
 function TStrList.IndexOf(const S: string): NativeInt;
@@ -732,12 +796,11 @@ end;
 procedure TStrList.Delete(Index: NativeInt);
 var
   i: NativeInt;
-  S: string;
 begin
   if (Index < 0) or (Index >= FCount) then
   begin
-    Str(Index, S);
     RunError(201);
+    Exit;
   end;
 
   Dec(FCount);
@@ -749,55 +812,65 @@ end;
 procedure TStrList.Insert(Index: NativeInt; const S: string);
 var
   OldCap, i: NativeInt;
-  IdxStr: string;
 begin
   if (Index < 0) or (Index > FCount) then
   begin
-    Str(Index, IdxStr);
     RunError(201);
+    Exit;
   end;
 
   OldCap := System.Length(FItems);
-  if FCount >= OldCap then
+  if OldCap = 0 then
+  begin
+    // Default-initialized record: grow from zero instead of 0 * 2.
+    OldCap := 16;
+    SetLength(FItems, OldCap);
+  end
+  else if FCount >= OldCap then
     SetLength(FItems, OldCap * 2);
 
   for i := FCount downto Index + 1 do
     FItems[i] := FItems[i - 1];
   FItems[Index] := S;
   Inc(FCount);
+
+  // An insertion at an arbitrary position can break the ordering Find relies
+  // on, so the sorted flag cannot be trusted afterwards.
+  FSorted := False;
 end;
 
 procedure TStrList.Exchange(Index1, Index2: NativeInt);
 var
   Temp: string;
-  S1, S2: string;
 begin
   if (Index1 < 0) or (Index1 >= FCount) or
      (Index2 < 0) or (Index2 >= FCount) then
   begin
-    Str(Index1, S1);
-    Str(Index2, S2);
     RunError(201);
+    Exit;
   end;
+
+  if Index1 = Index2 then Exit;
 
   Temp := FItems[Index1];
   FItems[Index1] := FItems[Index2];
   FItems[Index2] := Temp;
+
+  // Swapping two items generally breaks the ordering Find relies on.
+  FSorted := False;
 end;
 
 procedure TStrList.MoveItem(CurIndex, NewIndex: NativeInt);
 var
   Temp: string;
   i: NativeInt;
-  S1, S2: string;
 begin
   if CurIndex = NewIndex then Exit;
   if (CurIndex < 0) or (CurIndex >= FCount) or
      (NewIndex < 0) or (NewIndex >= FCount) then
   begin
-    Str(CurIndex, S1);
-    Str(NewIndex, S2);
     RunError(201);
+    Exit;
   end;
 
   Temp := FItems[CurIndex];
@@ -812,6 +885,9 @@ begin
       FItems[i] := FItems[i - 1];
   end;
   FItems[NewIndex] := Temp;
+
+  // Reordering breaks the ordering Find relies on.
+  FSorted := False;
 end;
 
 { ------------------------------------------------------------------- }
@@ -841,12 +917,11 @@ end;
 function TStrList.Names(Index: NativeInt): string;
 var
   P: NativeInt;
-  IdxStr: string;
 begin
   if (Index < 0) or (Index >= FCount) then
   begin
-    Str(Index, IdxStr);
     RunError(201);
+    Exit;
   end;
 
   P := System.Pos(NameValueSeparator, FItems[Index]);
@@ -859,12 +934,11 @@ end;
 function TStrList.ValueFromIndex(Index: NativeInt): string;
 var
   P: NativeInt;
-  IdxStr: string;
 begin
   if (Index < 0) or (Index >= FCount) then
   begin
-    Str(Index, IdxStr);
     RunError(201);
+    Exit;
   end;
 
   P := System.Pos(NameValueSeparator, FItems[Index]);
@@ -980,8 +1054,11 @@ begin
       begin
         SetLength(Line, L);
         Move(Start^, Line[1], L * SizeOf(Char));
-        Self.Add(Line);
-      end;
+      end
+      else
+        Line := '';
+      // Blank lines are real items; dropping them loses data on a reload.
+      Self.Add(Line);
 
       if (P^ = #13) and (P[1] = #10) then Inc(P);
       Start := P + 1;
@@ -1041,7 +1118,12 @@ end;
 
 function TStringView.GetChar(Index: NativeInt): Char;
 begin
-  Result := FData[Index];
+  // Unchecked by design elsewhere in the unit, but a read must never leave the
+  // buffer: out-of-range indices yield #0 instead of whatever precedes it.
+  if (Index < 0) or (Index >= FLength) or (FData = nil) then
+    Result := #0
+  else
+    Result := FData[Index];
 end;
 
 function TStringView.IsEmpty: Boolean;
@@ -1224,12 +1306,12 @@ function TStringView.toInt(out Value: Integer): Boolean;
 var
   P: PChar;
   Neg: Boolean;
-  Accum: Integer;
+  Accum: Int64;
   Digit: Integer;
   Remaining: NativeInt;
 begin
   Value := 0;
-  if FLength = 0 then Exit(False);
+  if (FLength = 0) or (FData = nil) then Exit(False);
 
   P := FData;
   Remaining := FLength;
@@ -1252,8 +1334,11 @@ begin
   Accum := 0;
   while Remaining > 0 do
   begin
-    if (P^ < '0') or (P^ > '9') then Break;
+    // The whole view must be a number: no trailing or embedded characters.
+    if (P^ < '0') or (P^ > '9') then Exit(False);
     Digit := Ord(P^) - Ord('0');
+    // Guard the accumulator before it overflows, then range-check below.
+    if Accum > (High(Int64) - Digit) div 10 then Exit(False);
     Accum := Accum * 10 + Digit;
     Inc(P);
     Dec(Remaining);
@@ -1262,8 +1347,10 @@ begin
   if Neg then
     Accum := -Accum;
 
+  if (Accum < Low(Integer)) or (Accum > High(Integer)) then Exit(False);
+
   Value := Accum;
-  Result := P > FData + Ord(Neg or (FData^ = '+'));
+  Result := True;
 end;
 
 function TStringView.toInt64(out Value: Int64): Boolean;
@@ -1271,11 +1358,11 @@ var
   P: PChar;
   Neg: Boolean;
   Accum: Int64;
-  Digit: Int64;
+  Digit: Integer;
   Remaining: NativeInt;
 begin
   Value := 0;
-  if FLength = 0 then Exit(False);
+  if (FLength = 0) or (FData = nil) then Exit(False);
 
   P := FData;
   Remaining := FLength;
@@ -1295,21 +1382,28 @@ begin
 
   if Remaining = 0 then Exit(False);
 
+  // Accumulate negatively so that Low(Int64) itself stays representable.
   Accum := 0;
   while Remaining > 0 do
   begin
-    if (P^ < '0') or (P^ > '9') then Break;
+    if (P^ < '0') or (P^ > '9') then Exit(False);
     Digit := Ord(P^) - Ord('0');
-    Accum := Accum * 10 + Digit;
+    if Accum < (Low(Int64) + Digit) div 10 then Exit(False);
+    Accum := Accum * 10 - Digit;
     Inc(P);
     Dec(Remaining);
   end;
 
   if Neg then
-    Accum := -Accum;
+    Value := Accum
+  else
+  begin
+    // -Low(Int64) does not fit in an Int64.
+    if Accum = Low(Int64) then Exit(False);
+    Value := -Accum;
+  end;
 
-  Value := Accum;
-  Result := P > FData + Ord(Neg or (FData^ = '+'));
+  Result := True;
 end;
 
 function TStringView.toString: string;
@@ -1323,7 +1417,16 @@ function TStringView.slice(Start: NativeInt; Count: NativeInt): TStringView;
 begin
   Result.FGuard := FGuard;
 
-  if Start >= FLength then
+  // Clamp instead of pointing outside the buffer (negative offsets used to
+  // read whatever happened to precede the string).
+  if Count < 0 then Count := 0;
+  if Start < 0 then
+  begin
+    Inc(Count, Start);
+    Start := 0;
+  end;
+
+  if (Start >= FLength) or (Count <= 0) then
   begin
     Result.FData := nil;
     Result.FLength := 0;

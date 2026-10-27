@@ -24,6 +24,7 @@
 
 # Compiled test/benchmark programs (keep the .pas sources!)
 /tests/smoke
+/tests/regression
 /tests/test_benchmark
 
 # Editor / IDE

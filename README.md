@@ -16,7 +16,22 @@ build tool.
 | Unit | Types / functions |
 |---|---|
 | `LightStrings.pas` | `TBuildStr` — `Init`, `Append(string)`, `Append(PChar, Len)`, `AppendLine`, `Chop`, `Clear`, `ToString`; `TStrList` — `Init`, `Add`, `Insert`, `Delete`, `Clear`, `Sort`, `NaturalSort`, `Reverse`, `IndexOf`, `IndexOfName`, `Names`, `Values`, `Exchange`, `MoveItem`, properties `Items[]` (default), `Count`, `Text`, `CommaText`, `DelimitedText`, `Delimiter`, `StrictDelimiter`, `Sorted`; `TStringView` — `Chars[]` |
-| `LightStringsUtils.pas` | `Split`, `Join`, `Trim`, `TrimLeft`, `TrimRight`, `BeginsWith`, `EndsWith`, `Contains`, `ContainsI`, `UpperCaseStr`, `Reverse`, `PrependIfMissing`, `AppendIfMissing` |
+| `LightStringsUtils.pas` | `Split`, `Join`, `Trim`, `TrimLeft`, `TrimRight`, `BeginsWith`, `EndsWith`, `Contains`, `ContainsI`, `Reverse`, `PrependIfMissing`, `AppendIfMissing` |
+
+### Behaviour notes
+
+Deliberate choices, and the places where this is not a drop-in `TStringList`.
+
+| Topic | Behaviour |
+|---|---|
+| `Items[]` / `Chars[]` | Unchecked by design (the unit compiles without range checks). `TStringView.Chars[]` returns `#0` outside `0 .. Length-1`, and `TStringView.slice` clamps negative offsets instead of reading before the buffer. |
+| `Sorted` / `Sort` | `Sort` sets `Sorted`, and `Add` keeps a sorted list sorted. `Insert`, `SetItem`, `Exchange`, `MoveItem` and `Reverse` clear `Sorted`, because they can break the byte order `Find` searches for. `Find` returns `False` unless `Sorted` is set. `NaturalSort` does **not** set `Sorted` (natural order is not byte order). |
+| `Text` | Blank lines are preserved by both `Text` and `LoadFromFile`, so a `Text` round-trip is lossless. |
+| `Clear` | Drops the items logically but keeps the allocated array (and the string references) for reuse; release the record to free the memory. |
+| `StrictDelimiter` | `True` disables quoting entirely (an item containing the delimiter then cannot round-trip), matching `TStrings`. |
+| `toInt` / `toInt64` | Strict: the whole view must be numeric — no trailing characters — and out-of-range input returns `False` instead of wrapping. |
+| `Reverse` (Utils) | UTF-8 aware: code points are reversed, multi-byte sequences stay intact. |
+| Sort order | `Sort`/`Find` compare whole strings byte-wise (as `<` does), not case-insensitively like `TStringList.Sort`. |
 
 ## Requirements
 
@@ -110,12 +125,21 @@ fpc @lightstrings.cfg tests/test_benchmark.pas -FU/tmp/ls-build -FE/tmp/ls-build
 /tmp/ls-build/test_benchmark
 ```
 
+`tests/regression.pas` is the self-checking program for the memory-safety and
+semantic fixes; build it with `-gh` so the heap trace covers them too:
+
+```bash
+mkdir -p /tmp/ls-reg
+fpc @lightstrings.cfg -gh tests/regression.pas -FU/tmp/ls-reg -FE/tmp/ls-reg
+/tmp/ls-reg/regression        # exits 0 when every check passes
+```
+
 ## Project layout
 
 ```
 LightStrings/
 ├── src/                    # the two library units
-├── tests/                  # benchmark + smoke program
+├── tests/                  # benchmark, smoke and regression programs
 ├── fpmake.pp               # Tier 1: native FPC package installer
 ├── lightstrings.cfg        # Tier 2: FPC response file
 ├── lightstrings_pkg.lpk    # Tier 3: Lazarus package
