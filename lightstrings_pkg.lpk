@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <Package Version="5">
+    <Name Value="lightstrings_pkg"/>
+    <Type Value="RunTime"/>
+    <Author Value="LightStrings Contributors"/>
+    <License Value="MIT"/>
+    <Description Value="Lightweight stack-based string handling for Free Pascal"/>
+    <CompilerOptions>
+      <Version Value="11"/>
+      <SearchPaths>
+        <OtherUnitFiles Value="src"/>
+        <UnitOutputDirectory Value="lib/$(TargetCPU)-$(TargetOS)"/>
+      </SearchPaths>
+      <Parsing>
+        <SyntaxOptions>
+          <Mode Value="ObjFPC"/>
+        </SyntaxOptions>
+      </Parsing>
+      <Other>
+        <CustomOptions Value="-Mobjfpc -Sh"/>
+      </Other>
+    </CompilerOptions>
+    <Files>
+      <Item>
+        <Filename Value="src/LightStrings.pas"/>
+        <UnitName Value="LightStrings"/>
+      </Item>
+      <Item>
+        <Filename Value="src/LightStringsUtils.pas"/>
+        <UnitName Value="LightStringsUtils"/>
+      </Item>
+    </Files>
+    <UsageOptions>
+      <UnitPath Value="$(PkgOutDir)"/>
+    </UsageOptions>
+    <PublishOptions>
+      <Version Value="2"/>
+      <UseFileFilters Value="True"/>
+    </PublishOptions>
+  </Package>
+</CONFIG>

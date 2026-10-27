@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# LightStrings - lightweight stack-based string handling for Free Pascal.
+# MIT License - see LICENSE.
+# ---------------------------------------------------------------------------
+
+# Compiler output
+*.o
+*.ppu
+*.a
+*.or
+*.rs
+*.compiled
+*.dcu
+/units/
+/lib/
+/bin/
+
+# fpmake installer binary and generated package metadata
+/fpmake
+/fpmake.o
+/lightstrings-*.fpm
+# `lazbuild lightstrings_pkg.lpk` writes the package unit next to the .lpk
+/lightstrings_pkg.pas
+
+# Compiled test/benchmark programs (keep the .pas sources!)
+/tests/smoke
+/tests/test_benchmark
+
+# Editor / IDE
+.vscode/
+*.code-workspace
+*.lps
+*.lpi
+ppas.sh
+link.res
+.DS_Store
+
+# Stale copies
+*.bak
+*.orig
+*~
