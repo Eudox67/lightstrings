@@ -148,28 +148,12 @@ fpc @lightstrings.cfg tests/testrunner.pas -FU/tmp/ls-tests -FE/tmp/ls-tests
 `tests/regression.pas` above is kept separate on purpose: it is the `-gh`
 memory-safety probe, while the FPCUnit suite is the behavioural gate.
 
-## Tools
-
-`tools/` holds the packaging helpers used by this repository:
-
-| Tool | Purpose |
-|---|---|
-| `tools/check_units.sh src [fail-file]` | Compiles every unit in a flat directory via a generated "uses everything" probe and reports each failure. Exit 0 means every shipped unit compiles. |
-| `tools/gen_fpmake.sh <pkg> <units-file> <oses> <cpus> <licence> <author> <desc> [out]` | Regenerates `fpmake.pp` from a unit list. |
-| `tools/gen_lpk.sh <pkg> <units-file> <licence> <author> <desc> <includes:yes\|no> [out]` | Regenerates the `.lpk` from the same list; refuses a package name that collides with a unit name. |
-| `tools/lightstrings-units.txt` | The unit list both generators consume. Regenerate after adding or removing a unit. |
-
-```bash
-tools/check_units.sh src /tmp/broken.txt          # -> "compiled: 2 / 2    failed: 0"
-```
-
 ## Project layout
 
 ```
 LightStrings/
 ├── src/                    # the two library units
 ├── tests/                  # FPCUnit suite + runner, smoke, regression, benchmark
-├── tools/                  # unit checker and package generators
 ├── fpmake.pp               # Tier 1: native FPC package installer
 ├── lightstrings.cfg        # Tier 2: FPC response file
 ├── lightstrings_pkg.lpk    # Tier 3: Lazarus package
