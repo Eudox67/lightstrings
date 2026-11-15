@@ -1,5 +1,13 @@
 # LightStrings
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Open Source](https://img.shields.io/badge/Open_Source-Yes-teal)](https://opensource.org/licenses/MIT)
+![Free Pascal](https://img.shields.io/badge/Free_Pascal-3.2.2%2B-orange)
+![Lazarus](https://img.shields.io/badge/Lazarus-lightstrings__pkg.lpk-1E5AA8)
+![Platform](https://img.shields.io/badge/Platform-Any_FPC_Target-555555)
+![Dependencies](https://img.shields.io/badge/Dependencies-None-007EC6)
+![Tests](https://img.shields.io/badge/FPCUnit-22_tests-brightgreen)
+
 Stack-based string handling for Free Pascal: `TBuildStr` (a growable builder
 without the `TStringList` heap dance), `TStrList` (a thin `TStringList`
 alternative), `TStringView` (a non-owning view), plus a small set of string
