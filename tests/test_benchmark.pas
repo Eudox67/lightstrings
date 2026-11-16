@@ -367,7 +367,7 @@ begin
 
   Start := GetTickCount64;
   for i := 0 to 99 do
-    S := LL.Values(Names[N - 1]);
+    S := LL.Values[Names[N - 1]];
   Result.LightMs := ElapsedMs(Start);
 
   Start := GetTickCount64;
@@ -436,7 +436,12 @@ begin
   Builder.Init(256);
   Start := GetTickCount64;
   for i := 0 to N - 1 do
-    Builder.Append('Testing string append number ' + IntToStr(i) + sLineBreak);
+  begin
+    { Append(Int64) renders on the stack: zero IntToStr heap allocations. }
+    Builder.Append('Testing string append number ');
+    Builder.Append(i);
+    Builder.Append(sLineBreak);
+  end;
   S := Builder.ToString;
   Result.LightMs := ElapsedMs(Start);
 

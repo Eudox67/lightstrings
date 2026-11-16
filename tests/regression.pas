@@ -90,6 +90,37 @@ begin
   CheckEqInt('Chop(too many) empties', 0, System.Length(B.ToString));
 end;
 
+procedure TestBuilderAppendInt64;
+var
+  B: TBuildStr;
+begin
+  { The 21-char stack buffer must hold the longest rendering: Low(Int64). }
+  B.Init;
+  B.Append(Low(Int64));
+  Check('Append(Low(Int64)) renders exactly', B.ToString = '-9223372036854775808');
+  B.Clear;
+  B.Append(High(Int64));
+  Check('Append(High(Int64)) renders exactly', B.ToString = '9223372036854775807');
+end;
+
+procedure TestBuilderCapacityZero;
+var
+  B: TBuildStr;
+begin
+  { SetCapacity(0) must free the buffer without leaking or double-freeing. }
+  B.Init;
+  B.Append('abc');
+  B.Clear;
+  B.Capacity := 0;
+  Check('Capacity 0 releases the buffer', B.Capacity = 0);
+  B.Append('again');
+  Check('builder reusable after Capacity 0', B.ToString = 'again');
+  B.Length := 8;
+  Check('Length extends with zero fill', System.Length(B.ToString) = 8);
+  B.Length := 2;
+  Check('Length truncates', B.ToString = 'ag');
+end;
+
 procedure TestSortedFind;
 var
   L: TStrList;
@@ -130,6 +161,26 @@ begin
   CheckEqInt('Text round-trip keeps blank lines', 3, L.Count);
   Check('Text round-trip keeps the blank item',
     (L[0] = 'a') and (L[1] = '') and (L[2] = 'b'));
+end;
+
+procedure TestFileRoundTrip;
+var
+  L: TStrList;
+  FName: string;
+begin
+  { LoadFromFile must keep calling System.Move: the TStrList.Move method now
+    shadows the System routine inside the record's scope. }
+  FName := '/tmp/ls_regression_file.txt';
+  L.Init;
+  L.Add('alpha');
+  L.Add('');
+  L.Add('beta');
+  L.SaveToFile(FName);
+  L.LoadFromFile(FName);
+  CheckEqInt('file round-trip keeps the count', 3, L.Count);
+  Check('file round-trip keeps the items',
+    (L[0] = 'alpha') and (L[1] = '') and (L[2] = 'beta'));
+  DeleteFile(FName);
 end;
 
 procedure TestStrictDelimiter;
@@ -206,8 +257,11 @@ begin
   TestBuilderAssign;
   TestBuilderReInit;
   TestBuilderChop;
+  TestBuilderAppendInt64;
+  TestBuilderCapacityZero;
   TestSortedFind;
   TestTextRoundTrip;
+  TestFileRoundTrip;
   TestStrictDelimiter;
   TestViewBounds;
   TestParsing;

@@ -42,13 +42,40 @@ type
     class operator Copy(constref Src: TBuildStr; var Dest: TBuildStr);
 
     procedure Init(InitialCapacity: NativeInt = 256); inline;
+    procedure EnsureCapacity(MinCapacity: NativeInt); inline;
+
     procedure Append(const S: string); inline;
     procedure Append(const P: PChar; Len: NativeInt); inline;
     procedure Append(const C: Char); inline;
+    procedure Append(Value: Int64);
     procedure AppendLine(const S: string = ''); inline;
+
     procedure Chop(N: NativeInt); inline;
     procedure Clear; inline;
     function ToString: string;
+
+    function GetLength: NativeInt; inline;
+    procedure SetLength(NewLength: NativeInt);
+    function GetCapacity: NativeInt; inline;
+    procedure SetCapacity(NewCapacity: NativeInt);
+    function GetChar(Index: NativeInt): Char; inline;
+    procedure SetChar(Index: NativeInt; Value: Char); inline;
+
+    property Length: NativeInt read GetLength write SetLength;
+    property Capacity: NativeInt read GetCapacity write SetCapacity;
+    property Chars[Index: NativeInt]: Char read GetChar write SetChar; default;
+  end;
+
+  PStrList = ^TStrList;
+
+  TStrListEnumerator = record
+  private
+    FList: PStrList;
+    FIndex: NativeInt;
+    function GetCurrent: string; inline;
+  public
+    function MoveNext: Boolean; inline;
+    property Current: string read GetCurrent;
   end;
 
   TStrList = record
@@ -56,7 +83,7 @@ type
     procedure QuickSort(var A: array of string; iLo, iHi: NativeInt);
     procedure NaturalQuickSort(var A: array of string; iLo, iHi: NativeInt);
     function SortedInsertIndex(const S: string): NativeInt;
-    procedure AddSlow(const S: string);
+    function AddSlow(const S: string): NativeInt;
   public
     FItems: array of string;
     FCount: NativeInt;
@@ -69,8 +96,9 @@ type
     class operator Copy(constref Src: TStrList; var Dest: TStrList);
 
     procedure Init(InitialCapacity: NativeInt = 16); inline;
-    procedure Add(const S: string); inline;
+    function Add(const S: string): NativeInt; inline;
     procedure Clear; inline;
+    function GetEnumerator: TStrListEnumerator; inline;
 
     { Sorting / search }
     procedure Sort;
@@ -83,14 +111,17 @@ type
     procedure Delete(Index: NativeInt);
     procedure Insert(Index: NativeInt; const S: string);
     procedure Exchange(Index1, Index2: NativeInt);
-    procedure MoveItem(CurIndex, NewIndex: NativeInt);
+    procedure Move(CurIndex, NewIndex: NativeInt);
+    procedure MoveItem(CurIndex, NewIndex: NativeInt); inline;
 
     { Name/Value }
     const NameValueSeparator: Char = '=';
     function IndexOfName(const Name: string): NativeInt;
-    function Names(Index: NativeInt): string;
-    function ValueFromIndex(Index: NativeInt): string;
-    function Values(const Name: string): string;
+    function GetName(Index: NativeInt): string;
+    function GetValueFromIndex(Index: NativeInt): string;
+    procedure SetValueFromIndex(Index: NativeInt; const Value: string);
+    function GetValue(const Name: string): string;
+    procedure SetValue(const Name, Value: string);
     function AddPair(const AName, AValue: string): NativeInt;
 
     { Text / Delimited }
@@ -99,6 +130,7 @@ type
     function GetDelimitedText: string;
     function GetItem(Index: NativeInt): string;
     function GetCount: NativeInt;
+    function GetCapacity: NativeInt; inline;
     function GetDelimiter: Char;
     function GetStrictDelimiter: Boolean;
     function GetSorted: Boolean;
@@ -107,6 +139,7 @@ type
     procedure SetCommaText(const Value: string);
     procedure SetDelimitedText(const Value: string);
     procedure SetItem(Index: NativeInt; const Value: string);
+    procedure SetCapacity(NewCapacity: NativeInt);
     procedure SetDelimiter(const Value: Char);
     procedure SetStrictDelimiter(const Value: Boolean);
     procedure SetSorted(Value: Boolean);
@@ -116,9 +149,13 @@ type
     property DelimitedText: string read GetDelimitedText write SetDelimitedText;
     property Items[Index: NativeInt]: string read GetItem write SetItem; default;
     property Count: NativeInt read GetCount;
+    property Capacity: NativeInt read GetCapacity write SetCapacity;
     property Delimiter: Char read GetDelimiter write SetDelimiter;
     property StrictDelimiter: Boolean read GetStrictDelimiter write SetStrictDelimiter;
     property Sorted: Boolean read GetSorted write SetSorted;
+    property Names[Index: NativeInt]: string read GetName;
+    property ValueFromIndex[Index: NativeInt]: string read GetValueFromIndex write SetValueFromIndex;
+    property Values[const Name: string]: string read GetValue write SetValue;
 
     { File I/O }
     procedure SaveToFile(const FileName: string);
@@ -360,6 +397,12 @@ begin
   GetMem(FBuffer, FCapacity * SizeOf(Char));
 end;
 
+procedure TBuildStr.EnsureCapacity(MinCapacity: NativeInt);
+begin
+  if MinCapacity > FCapacity then
+    Grow(MinCapacity);
+end;
+
 procedure TBuildStr.Append(const S: string);
 var
   L: NativeInt;
@@ -370,7 +413,7 @@ begin
     Grow(FLength + L);
 
   if L > 0 then
-    Move(PChar(S)^, FBuffer[FLength], L * SizeOf(Char));
+    System.Move(PChar(Pointer(S))^, FBuffer[FLength], L * SizeOf(Char));
 
   Inc(FLength, L);
 end;
@@ -395,6 +438,49 @@ begin
   Inc(FLength);
 end;
 
+procedure TBuildStr.Append(Value: Int64);
+var
+  Buf: array[0..20] of Char;
+  U: QWord;
+  Neg: Boolean;
+  Idx: NativeInt;
+begin
+  if Value = 0 then
+  begin
+    Append('0');
+    Exit;
+  end;
+
+  if Value < 0 then
+  begin
+    Neg := True;
+    // Two's complement in QWord avoids overflow even for Low(Int64).
+    U := QWord(not Value) + 1;
+  end
+  else
+  begin
+    Neg := False;
+    U := QWord(Value);
+  end;
+
+  // Render backwards into a stack buffer: no heap allocation at all.
+  Idx := 21;
+  while U > 0 do
+  begin
+    Dec(Idx);
+    Buf[Idx] := Char(Ord('0') + (U mod 10));
+    U := U div 10;
+  end;
+
+  if Neg then
+  begin
+    Dec(Idx);
+    Buf[Idx] := '-';
+  end;
+
+  Append(@Buf[Idx], 21 - Idx);
+end;
+
 procedure TBuildStr.AppendLine(const S: string);
 begin
   Append(S);
@@ -417,9 +503,84 @@ end;
 
 function TBuildStr.ToString: string;
 begin
-  SetLength(Result, FLength);
+  // System-qualified: TBuildStr.SetLength would otherwise shadow the routine.
+  System.SetLength(Result, FLength);
   if FLength > 0 then
-    Move(FBuffer[0], Result[1], FLength * SizeOf(Char));
+    System.Move(FBuffer[0], PChar(Pointer(Result))^, FLength * SizeOf(Char));
+end;
+
+function TBuildStr.GetLength: NativeInt;
+begin
+  Result := FLength;
+end;
+
+procedure TBuildStr.SetLength(NewLength: NativeInt);
+begin
+  if NewLength < 0 then
+  begin
+    RunError(201);
+    Exit;
+  end;
+
+  if NewLength > FCapacity then
+    Grow(NewLength);
+
+  // TStringBuilder semantics: extension is zero-filled, shrinking truncates.
+  if NewLength > FLength then
+    FillChar(FBuffer[FLength], (NewLength - FLength) * SizeOf(Char), 0);
+
+  FLength := NewLength;
+end;
+
+function TBuildStr.GetCapacity: NativeInt;
+begin
+  Result := FCapacity;
+end;
+
+procedure TBuildStr.SetCapacity(NewCapacity: NativeInt);
+begin
+  if NewCapacity < FLength then
+  begin
+    RunError(201);
+    Exit;
+  end;
+
+  if NewCapacity = FCapacity then Exit;
+
+  if NewCapacity = 0 then
+  begin
+    if FBuffer <> nil then
+    begin
+      FreeMem(FBuffer);
+      FBuffer := nil;
+    end;
+    FCapacity := 0;
+  end
+  else
+  begin
+    ReallocMem(FBuffer, NewCapacity * SizeOf(Char));
+    FCapacity := NewCapacity;
+  end;
+end;
+
+function TBuildStr.GetChar(Index: NativeInt): Char;
+begin
+  if (Index < 0) or (Index >= FLength) then
+  begin
+    RunError(201);
+    Exit(#0);
+  end;
+  Result := FBuffer[Index];
+end;
+
+procedure TBuildStr.SetChar(Index: NativeInt; Value: Char);
+begin
+  if (Index < 0) or (Index >= FLength) then
+  begin
+    RunError(201);
+    Exit;
+  end;
+  FBuffer[Index] := Value;
 end;
 
 { ------------------------------------------------------------------- }
@@ -482,19 +643,19 @@ begin
   Result := Lo;
 end;
 
-procedure TStrList.AddSlow(const S: string);
+function TStrList.AddSlow(const S: string): NativeInt;
 var
-  Capacity, Index, i: NativeInt;
+  Cap, Index, i: NativeInt;
 begin
-  Capacity := System.Length(FItems);
-  if Capacity = 0 then
+  Cap := System.Length(FItems);
+  if Cap = 0 then
   begin
     // A default-initialized record has no storage: grow from zero, not 0 * 2.
-    Capacity := 16;
-    SetLength(FItems, Capacity);
+    Cap := 16;
+    SetLength(FItems, Cap);
   end
-  else if FCount >= Capacity then
-    SetLength(FItems, Capacity * 2);
+  else if FCount >= Cap then
+    SetLength(FItems, Cap * 2);
 
   if FSorted then
   begin
@@ -508,22 +669,45 @@ begin
 
   FItems[Index] := S;
   Inc(FCount);
+  Result := Index;
 end;
 
-procedure TStrList.Add(const S: string);
+function TStrList.Add(const S: string): NativeInt;
 begin
   if (not FSorted) and (FCount < System.Length(FItems)) then
   begin
-    FItems[FCount] := S;
+    Result := FCount;
+    FItems[Result] := S;
     Inc(FCount);
   end
   else
-    AddSlow(S);
+    Result := AddSlow(S);
 end;
 
 procedure TStrList.Clear;
 begin
   FCount := 0;
+end;
+
+{ ------------------------------------------------------------------- }
+{  TStrList — enumeration                                              }
+{ ------------------------------------------------------------------- }
+
+function TStrListEnumerator.GetCurrent: string;
+begin
+  Result := FList^.FItems[FIndex];
+end;
+
+function TStrListEnumerator.MoveNext: Boolean;
+begin
+  Inc(FIndex);
+  Result := FIndex < FList^.FCount;
+end;
+
+function TStrList.GetEnumerator: TStrListEnumerator;
+begin
+  Result.FList := @Self;
+  Result.FIndex := -1;
 end;
 
 { ------------------------------------------------------------------- }
@@ -533,6 +717,11 @@ end;
 function TStrList.GetCount: NativeInt;
 begin
   Result := FCount;
+end;
+
+function TStrList.GetCapacity: NativeInt;
+begin
+  Result := System.Length(FItems);
 end;
 
 function TStrList.GetDelimiter: Char;
@@ -699,6 +888,17 @@ begin
   if FSorted and (FItems[Index] <> Value) then
     FSorted := False;
   FItems[Index] := Value;
+end;
+
+procedure TStrList.SetCapacity(NewCapacity: NativeInt);
+begin
+  if NewCapacity < FCount then
+  begin
+    RunError(201);
+    Exit;
+  end;
+  if NewCapacity <> System.Length(FItems) then
+    SetLength(FItems, NewCapacity);
 end;
 
 procedure TStrList.SetDelimiter(const Value: Char);
@@ -991,9 +1191,10 @@ begin
   FSorted := False;
 end;
 
-procedure TStrList.MoveItem(CurIndex, NewIndex: NativeInt);
+procedure TStrList.Move(CurIndex, NewIndex: NativeInt);
 var
-  Temp: string;
+  TempPtr: Pointer;
+  Ptrs: PPointer;
   i: NativeInt;
 begin
   if CurIndex = NewIndex then Exit;
@@ -1004,21 +1205,28 @@ begin
     Exit;
   end;
 
-  Temp := FItems[CurIndex];
+  // Shift raw string pointers: no per-element reference-count traffic.
+  Ptrs := PPointer(@FItems[0]);
+  TempPtr := Ptrs[CurIndex];
   if CurIndex < NewIndex then
   begin
     for i := CurIndex to NewIndex - 1 do
-      FItems[i] := FItems[i + 1];
+      Ptrs[i] := Ptrs[i + 1];
   end
   else
   begin
     for i := CurIndex downto NewIndex + 1 do
-      FItems[i] := FItems[i - 1];
+      Ptrs[i] := Ptrs[i - 1];
   end;
-  FItems[NewIndex] := Temp;
+  Ptrs[NewIndex] := TempPtr;
 
   // Reordering breaks the ordering Find relies on.
   FSorted := False;
+end;
+
+procedure TStrList.MoveItem(CurIndex, NewIndex: NativeInt);
+begin
+  Move(CurIndex, NewIndex);
 end;
 
 { ------------------------------------------------------------------- }
@@ -1045,7 +1253,7 @@ begin
   Result := -1;
 end;
 
-function TStrList.Names(Index: NativeInt): string;
+function TStrList.GetName(Index: NativeInt): string;
 var
   P: NativeInt;
 begin
@@ -1062,7 +1270,7 @@ begin
     Result := '';
 end;
 
-function TStrList.ValueFromIndex(Index: NativeInt): string;
+function TStrList.GetValueFromIndex(Index: NativeInt): string;
 var
   P: NativeInt;
 begin
@@ -1079,21 +1287,53 @@ begin
     Result := '';
 end;
 
-function TStrList.Values(const Name: string): string;
+procedure TStrList.SetValueFromIndex(Index: NativeInt; const Value: string);
+begin
+  if (Index < 0) or (Index >= FCount) then
+  begin
+    RunError(201);
+    Exit;
+  end;
+
+  // TStrings semantics: an empty value removes the entry entirely.
+  if Value <> '' then
+    SetItem(Index, GetName(Index) + NameValueSeparator + Value)
+  else
+    Delete(Index);
+end;
+
+function TStrList.GetValue(const Name: string): string;
 var
   Idx: NativeInt;
 begin
   Idx := IndexOfName(Name);
   if Idx >= 0 then
-    Result := ValueFromIndex(Idx)
+    Result := GetValueFromIndex(Idx)
   else
     Result := '';
 end;
 
+procedure TStrList.SetValue(const Name, Value: string);
+var
+  Idx: NativeInt;
+begin
+  Idx := IndexOfName(Name);
+  if Value <> '' then
+  begin
+    if Idx >= 0 then
+      SetItem(Idx, Name + NameValueSeparator + Value)
+    else
+      AddPair(Name, Value);
+  end
+  else if Idx >= 0 then
+    Delete(Idx);
+end;
+
 function TStrList.AddPair(const AName, AValue: string): NativeInt;
 begin
-  Result := FCount;
-  Self.Add(AName + NameValueSeparator + AValue);
+  // Add returns the real insertion index, which differs from FCount when the
+  // list is sorted.
+  Result := Self.Add(AName + NameValueSeparator + AValue);
 end;
 
 { ------------------------------------------------------------------- }
@@ -1133,9 +1373,12 @@ var
   F: File;
   Size: Int64;
   Buf: string;
-  P, Start: PChar;
+  P, Start, EndP: PChar;
   Line: string;
-  L: NativeInt;
+  L, Cap: NativeInt;
+  {$IF SizeOf(Char) = 1}
+  Idx: SizeInt;
+  {$ENDIF}
 begin
   Self.Clear;
 
@@ -1152,28 +1395,64 @@ begin
     Exit;
   end;
 
-  SetLength(Buf, Size);
-  BlockRead(F, PChar(Buf)^, Size);
+  System.SetLength(Buf, Size);
+  BlockRead(F, PChar(Pointer(Buf))^, Size);
   Close(F);
 
-  P := PChar(Buf);
+  P := PChar(Pointer(Buf));
+  EndP := P + Size;
+
+  {$IF SizeOf(Char) = 1}
+  if (not FSorted) and (System.IndexByte(P^, Size, 13) < 0) then
+  begin
+    Cap := System.Length(FItems);
+    Start := P;
+    while Start < EndP do
+    begin
+      Idx := System.IndexByte(Start^, EndP - Start, 10);
+      if Idx < 0 then
+        L := EndP - Start
+      else
+        L := Idx;
+
+      if FCount >= Cap then
+      begin
+        if Cap = 0 then Cap := 16 else Cap := Cap * 2;
+        System.SetLength(FItems, Cap);
+      end;
+
+      if L > 0 then
+      begin
+        System.SetLength(FItems[FCount], L);
+        System.Move(Start^, PChar(Pointer(FItems[FCount]))^, L * SizeOf(Char));
+      end
+      else
+        FItems[FCount] := '';
+      Inc(FCount);
+
+      if Idx < 0 then Break;
+      Inc(Start, Idx + 1);
+    end;
+    Exit;
+  end;
+  {$ENDIF}
+
   Start := P;
-  while P^ <> #0 do
+  while P < EndP do
   begin
     if (P^ = #13) or (P^ = #10) then
     begin
       L := P - Start;
       if L > 0 then
       begin
-        SetLength(Line, L);
-        Move(Start^, Line[1], L * SizeOf(Char));
+        System.SetLength(Line, L);
+        System.Move(Start^, PChar(Pointer(Line))^, L * SizeOf(Char));
       end
       else
         Line := '';
-      // Blank lines are real items; dropping them loses data on a reload.
       Self.Add(Line);
 
-      if (P^ = #13) and (P[1] = #10) then Inc(P);
+      if (P^ = #13) and (P + 1 < EndP) and (P[1] = #10) then Inc(P);
       Start := P + 1;
     end;
     Inc(P);
@@ -1182,8 +1461,8 @@ begin
   if P > Start then
   begin
     L := P - Start;
-    SetLength(Line, L);
-    Move(Start^, Line[1], L * SizeOf(Char));
+    System.SetLength(Line, L);
+    System.Move(Start^, PChar(Pointer(Line))^, L * SizeOf(Char));
     Self.Add(Line);
   end;
 end;

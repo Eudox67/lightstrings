@@ -6,7 +6,7 @@
 ![Lazarus](https://img.shields.io/badge/Lazarus-lightstrings__pkg.lpk-1E5AA8)
 ![Platform](https://img.shields.io/badge/Platform-Any_FPC_Target-555555)
 ![Dependencies](https://img.shields.io/badge/Dependencies-None-007EC6)
-![Tests](https://img.shields.io/badge/FPCUnit-22_tests-brightgreen)
+![Tests](https://img.shields.io/badge/FPCUnit-31_tests-brightgreen)
 
 Stack-based string handling for Free Pascal: `TBuildStr` (a growable builder
 without the `TStringList` heap dance), `TStrList` (a thin `TStringList`
@@ -23,7 +23,7 @@ build tool.
 
 | Unit | Types / functions |
 |---|---|
-| `LightStrings.pas` | `TBuildStr` — `Init`, `Append(string)`, `Append(PChar, Len)`, `AppendLine`, `Chop`, `Clear`, `ToString`; `TStrList` — `Init`, `Add`, `Insert`, `Delete`, `Clear`, `Sort`, `NaturalSort`, `Reverse`, `IndexOf`, `IndexOfName`, `Names`, `Values`, `Exchange`, `MoveItem`, properties `Items[]` (default), `Count`, `Text`, `CommaText`, `DelimitedText`, `Delimiter`, `StrictDelimiter`, `Sorted`; `TStringView` — `Chars[]` |
+| `LightStrings.pas` | `TBuildStr` — `Init`, `Append(string)`, `Append(PChar, Len)`, `Append(Char)`, `Append(Int64)`, `AppendLine`, `EnsureCapacity`, `Chop`, `Clear`, `ToString`, properties `Length`, `Capacity`, `Chars[]` (default); `TStrList` — `Init`, `Add` (returns the item index), `AddPair`, `Insert`, `Delete`, `Clear`, `Sort`, `NaturalSort`, `Reverse`, `IndexOf`, `IndexOfName`, `Exchange`, `Move`, `MoveItem`, `GetEnumerator` (`for S in List`), properties `Items[]` (default), `Count`, `Capacity`, `Text`, `CommaText`, `DelimitedText`, `Delimiter`, `StrictDelimiter`, `Sorted`, `Names[]`, `ValueFromIndex[]`, `Values[]`; `TStringView` — `Chars[]` |
 | `LightStringsUtils.pas` | `Split`, `Join`, `Trim`, `TrimLeft`, `TrimRight`, `BeginsWith`, `EndsWith`, `Contains`, `ContainsI`, `Reverse`, `PrependIfMissing`, `AppendIfMissing` |
 
 ### Behaviour notes
@@ -33,9 +33,17 @@ Deliberate choices, and the places where this is not a drop-in `TStringList`.
 | Topic | Behaviour |
 |---|---|
 | `Items[]` / `Chars[]` | Unchecked by design (the unit compiles without range checks). `TStringView.Chars[]` returns `#0` outside `0 .. Length-1`, and `TStringView.slice` clamps negative offsets instead of reading before the buffer. |
-| `Sorted` / `Sort` | `Sort` sets `Sorted`, and `Add` keeps a sorted list sorted. `Insert`, `SetItem`, `Exchange`, `MoveItem` and `Reverse` clear `Sorted`, because they can break the byte order `Find` searches for. `Find` returns `False` unless `Sorted` is set. `NaturalSort` does **not** set `Sorted` (natural order is not byte order). |
+| `Sorted` / `Sort` | `Sort` sets `Sorted`, and `Add` keeps a sorted list sorted. `Insert`, `SetItem`, `Exchange`, `Move`/`MoveItem` and `Reverse` clear `Sorted`, because they can break the byte order `Find` searches for. `Find` returns `False` unless `Sorted` is set. `NaturalSort` does **not** set `Sorted` (natural order is not byte order). |
+| `Add` / `AddPair` | Return the index the item actually landed at — the sorted insertion point when `Sorted` is set, the append position otherwise (like `TStrings.Add`). |
+| `Values[]` / `ValueFromIndex[]` | Writable, matching `TStrings`: writing a non-empty value updates the pair (or adds it when the name is missing); writing `''` deletes the entry. |
+| `Capacity` | Exposes the allocated storage; setting it grows or shrinks the array (shrinking below `Count` is a range error, `RunError(201)`). `Add` still auto-grows past a manually set capacity. |
+| `Move` vs `MoveItem` | `Move` matches the `TStrings` name; `MoveItem` is kept as an inline alias. Both shift string pointers (no per-item copy) and clear `Sorted`. |
 | `Text` | Blank lines are preserved by both `Text` and `LoadFromFile`, so a `Text` round-trip is lossless. |
 | `Clear` | Drops the items logically but keeps the allocated array (and the string references) for reuse; release the record to free the memory. |
+| `TBuildStr.Chars[]` | Bounds-checked like `TStringBuilder.Chars`: out-of-range access is a range error (`RunError(201)`), unlike the unchecked `TStrList.Items[]` or the `#0`-sentinel `TStringView.Chars[]`. |
+| `TBuildStr.Length` | `TStringBuilder` semantics: extending zero-fills (`#0`) the new tail, shrinking truncates; negative lengths are a range error. |
+| `TBuildStr.Capacity` | Exact reallocation (no growth rounding, unlike the internal `Grow`); `0` releases the buffer; below `Length` is a range error. `EnsureCapacity` uses the amortized growth strategy instead. |
+| `Append(Int64)` | Allocation-free: renders backwards into a 21-char stack buffer, handles `Low(Int64)` via two's-complement negation, and accepts `Integer`/`NativeInt`/`Int64` values through a single overload. |
 | `StrictDelimiter` | `True` disables quoting entirely (an item containing the delimiter then cannot round-trip), matching `TStrings`. |
 | `toInt` / `toInt64` | Strict: the whole view must be numeric — no trailing characters — and out-of-range input returns `False` instead of wrapping. |
 | `Reverse` (Utils) | UTF-8 aware: code points are reversed, multi-byte sequences stay intact. |
@@ -139,19 +147,18 @@ fpc @lightstrings.cfg tests/test_benchmark.pas -FU/tmp/ls-build -FE/tmp/ls-build
 
 Benchmark                                  | LightStrings |  TStringList | Result         
 -------------------------------------------+--------------+--------------+----------------
-1. Add (2,000,000 items)                   |      27.0 ms |      81.0 ms | 3.00x faster   
-2. IndexOf (2M items, 1000 searches)       |       1.0 ms |      12.0 ms | 12.00x faster  
-3. Sort (2M items; byte vs CompareText)    |    1320.0 ms |    3017.0 ms | 2.29x faster   
-4. NaturalSort vs CustomSort (2M items)    |    4299.0 ms |    5979.0 ms | 1.39x faster   
-5. Text (2,000,000 items)                  |      48.0 ms |      52.0 ms | 1.08x faster   
-6. CommaText (2,000,000 items)             |      86.0 ms |     609.0 ms | 7.08x faster   
-7. Name/Value (2M items, 100 lookups)      |    1264.0 ms |    8394.0 ms | 6.64x faster   
-8. File I/O (80,000 items)                 |      13.0 ms |     309.0 ms | 23.77x faster  
-9. TBuildStr vs TStringList.Text (2M)      |     269.0 ms |     334.0 ms | 1.24x faster   
-10. TStringView vs Copy+Pos (2M x 24)      |      35.0 ms |    1273.0 ms | 36.37x faster  
+1. Add (2,000,000 items)                   |      31.0 ms |      87.0 ms | 2.81x faster   
+2. IndexOf (2M items, 1000 searches)       |       2.0 ms |      11.0 ms | 5.50x faster   
+3. Sort (2M items; byte vs CompareText)    |    1406.0 ms |    2821.0 ms | 2.01x faster   
+4. NaturalSort vs CustomSort (2M items)    |   10562.0 ms |   11656.0 ms | 1.10x faster   
+5. Text (2,000,000 items)                  |      65.0 ms |      50.0 ms | 1.30x slower   
+6. CommaText (2,000,000 items)             |     150.0 ms |     617.0 ms | 4.11x faster   
+7. Name/Value (2M items, 100 lookups)      |    1432.0 ms |    8815.0 ms | 6.16x faster   
+8. File I/O (80,000 items)                 |      16.0 ms |     313.0 ms | 19.56x faster  
+9. TBuildStr vs TStringList.Text (2M)      |     168.0 ms |     329.0 ms | 1.96x faster   
+10. TStringView vs Copy+Pos (2M x 24)      |      47.0 ms |    1282.0 ms | 27.28x faster  
 -------------------------------------------+--------------+--------------+----------------
-Total                                      |    7362.0 ms |   20050.0 ms | 2.72x faster   
-
+Total                                      |   13879.0 ms |   25981.0 ms | 1.87x faster
 ```
 
 `tests/regression.pas` is the self-checking program for the memory-safety and
@@ -171,7 +178,7 @@ both units; `tests/testrunner.pas` is the console runner that registers it.
 ```bash
 mkdir -p /tmp/ls-tests
 fpc @lightstrings.cfg tests/testrunner.pas -FU/tmp/ls-tests -FE/tmp/ls-tests
-/tmp/ls-tests/testrunner                          # 22 tests, 0 failures
+/tmp/ls-tests/testrunner                          # 31 tests, 0 failures
 ```
 
 `tests/regression.pas` above is kept separate on purpose: it is the `-gh`

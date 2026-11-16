@@ -21,6 +21,10 @@ type
     procedure TestAppendString;
     procedure TestAppendPChar;
     procedure TestAppendLine;
+    procedure TestAppendInt64;
+    procedure TestLengthProperty;
+    procedure TestCapacityAndEnsure;
+    procedure TestCharsProperty;
     procedure TestChop;
     procedure TestClear;
   end;
@@ -33,9 +37,14 @@ type
     procedure TestSortAndFind;
     procedure TestSortedAddKeepsOrder;
     procedure TestExchangeAndMoveItem;
+    procedure TestMove;
+    procedure TestAddReturnsIndex;
+    procedure TestCapacity;
+    procedure TestForEachEnumerator;
     procedure TestTextRoundTrip;
     procedure TestDelimitedText;
     procedure TestNameValue;
+    procedure TestNameValueWrite;
   end;
 
   { TStringView }
@@ -96,6 +105,101 @@ begin
   B.AppendLine('b');
   Expected := 'a' + System.LineEnding + 'b' + System.LineEnding;
   AssertEquals('AppendLine terminates each line', Expected, B.ToString);
+end;
+
+procedure TBuilderTests.TestAppendInt64;
+var
+  B: TBuildStr;
+  N: Int64;
+begin
+  B.Init;
+  N := 0;
+  B.Append(N);
+  AssertEquals('Append(Int64) renders zero', '0', B.ToString);
+
+  B.Clear;
+  B.Append(42);
+  AssertEquals('Append accepts an integer literal', '42', B.ToString);
+
+  B.Clear;
+  N := -42;
+  B.Append(N);
+  AssertEquals('Append(Int64) renders a negative value', '-42', B.ToString);
+
+  B.Clear;
+  B.Append(High(Int64));
+  AssertEquals('Append(Int64) renders High(Int64)',
+    '9223372036854775807', B.ToString);
+
+  B.Clear;
+  B.Append(Low(Int64));
+  AssertEquals('Append(Int64) renders Low(Int64)',
+    '-9223372036854775808', B.ToString);
+
+  B.Clear;
+  B.Append('n=');
+  N := 7;
+  B.Append(N);
+  AssertEquals('Append(Int64) composes with strings', 'n=7', B.ToString);
+end;
+
+procedure TBuilderTests.TestLengthProperty;
+var
+  B: TBuildStr;
+begin
+  B.Init;
+  B.Append('abc');
+  AssertEquals('Length reports the content size', 3, Integer(B.Length));
+
+  B.Length := 5;
+  AssertEquals('Length grows the content', 5, Integer(B.Length));
+  AssertTrue('the extension is zero-filled', B.Chars[3] = #0);
+  AssertTrue('the extension is zero-filled to the end', B.Chars[4] = #0);
+  AssertEquals('the original content survives', 'abc',
+    System.Copy(B.ToString, 1, 3));
+
+  B.Length := 2;
+  AssertEquals('Length shrinks the content', 'ab', B.ToString);
+
+  B.Length := 0;
+  AssertEquals('Length 0 empties the builder', '', B.ToString);
+end;
+
+procedure TBuilderTests.TestCapacityAndEnsure;
+var
+  B: TBuildStr;
+begin
+  B.Init(16);
+  AssertEquals('Init sets the capacity', 16, Integer(B.Capacity));
+
+  B.EnsureCapacity(100);
+  AssertTrue('EnsureCapacity grows to at least the request', B.Capacity >= 100);
+
+  B.Append('abc');
+  B.Capacity := 64;
+  AssertEquals('Capacity can be set exactly', 64, Integer(B.Capacity));
+  AssertEquals('changing capacity keeps the content', 'abc', B.ToString);
+
+  B.Clear;
+  B.Capacity := 0;
+  AssertEquals('Capacity 0 releases the buffer', 0, Integer(B.Capacity));
+  B.Append('again');
+  AssertEquals('the builder is reusable after Capacity 0', 'again', B.ToString);
+end;
+
+procedure TBuilderTests.TestCharsProperty;
+var
+  B: TBuildStr;
+begin
+  B.Init;
+  B.Append('abc');
+
+  AssertTrue('Chars reads a character', B.Chars[1] = 'b');
+  AssertTrue('the default indexer reads too', B[2] = 'c');
+
+  B.Chars[0] := 'A';
+  B[2] := 'C';
+  AssertEquals('Chars writes through to the buffer', 'AbC', B.ToString);
 end;
 
 procedure TBuilderTests.TestChop;
@@ -269,14 +373,136 @@ begin
   L.Init;
   AddedIndex := L.AddPair('name', 'value');
 
-  AssertEquals('AddPair returns the pre-insert index', 0, Integer(AddedIndex));
+  AssertEquals('AddPair returns the insertion index', 0, Integer(AddedIndex));
   AssertEquals('IndexOfName finds the pair', 0, Integer(L.IndexOfName('name')));
   AssertEquals('IndexOfName rejects a prefix match', -1,
     Integer(L.IndexOfName('nam')));
-  AssertEquals('Names splits the name', 'name', L.Names(0));
-  AssertEquals('ValueFromIndex splits the value', 'value', L.ValueFromIndex(0));
-  AssertEquals('Values looks the value up by name', 'value', L.Values('name'));
-  AssertEquals('Values returns empty for a missing name', '', L.Values('missing'));
+  AssertEquals('Names splits the name', 'name', L.Names[0]);
+  AssertEquals('ValueFromIndex splits the value', 'value', L.ValueFromIndex[0]);
+  AssertEquals('Values looks the value up by name', 'value', L.Values['name']);
+  AssertEquals('Values returns empty for a missing name', '', L.Values['missing']);
+end;
+
+procedure TStrListTests.TestNameValueWrite;
+var
+  L: TStrList;
+begin
+  L.Init;
+  L.AddPair('name', 'value');
+
+  L.Values['name'] := 'other';
+  AssertEquals('Values[] updates an existing pair', 'other', L.Values['name']);
+  AssertEquals('updating keeps the count', 1, Integer(L.Count));
+
+  L.Values['extra'] := 'added';
+  AssertEquals('Values[] adds a missing name', 'added', L.Values['extra']);
+  AssertEquals('adding grows the count', 2, Integer(L.Count));
+
+  L.ValueFromIndex[0] := 'third';
+  AssertEquals('ValueFromIndex[] keeps the name', 'name', L.Names[0]);
+  AssertEquals('ValueFromIndex[] replaces the value', 'third', L.Values['name']);
+
+  L.Values['name'] := '';
+  AssertEquals('an empty Values[] write deletes the pair', -1,
+    Integer(L.IndexOfName('name')));
+  AssertEquals('delete shrinks the count', 1, Integer(L.Count));
+
+  L.ValueFromIndex[0] := '';
+  AssertEquals('an empty ValueFromIndex[] write deletes the item',
+    0, Integer(L.Count));
+end;
+
+procedure TStrListTests.TestMove;
+var
+  L: TStrList;
+begin
+  L.Init;
+  L.Add('a');
+  L.Add('b');
+  L.Add('c');
+  L.Add('d');
+
+  L.Move(0, 2);
+  AssertEquals('Move forward shifts the head', 'b', L[0]);
+  AssertEquals('Move forward lands the item', 'a', L[2]);
+  AssertEquals('Move forward keeps the tail', 'd', L[3]);
+
+  L.Move(3, 1);
+  AssertEquals('Move backward lands the item', 'd', L[1]);
+  AssertEquals('Move backward shifts the tail', 'a', L[3]);
+
+  L.Move(1, 1);
+  AssertEquals('Move to the same index is a no-op', 'd', L[1]);
+
+  L.Sort;
+  L.Move(0, 3);
+  AssertFalse('Move clears the sorted flag', L.Sorted);
+end;
+
+procedure TStrListTests.TestAddReturnsIndex;
+var
+  L: TStrList;
+begin
+  L.Init;
+  AssertEquals('Add returns the first index', 0, Integer(L.Add('b')));
+  AssertEquals('Add returns the append index', 1, Integer(L.Add('d')));
+
+  L.Sort;
+  AssertEquals('Add on a sorted list returns the insertion index',
+    1, Integer(L.Add('c')));
+  AssertEquals('the sorted insert landed at that index', 'c', L[1]);
+  AssertEquals('AddPair returns the sorted insertion index',
+    0, Integer(L.AddPair('a', 'x')));
+end;
+
+procedure TStrListTests.TestCapacity;
+var
+  L: TStrList;
+begin
+  L.Init(4);
+  AssertEquals('Init sets the capacity', 4, Integer(L.Capacity));
+
+  L.Capacity := 32;
+  AssertEquals('Capacity grows the storage', 32, Integer(L.Capacity));
+
+  L.Add('a');
+  L.Add('b');
+  L.Capacity := 2;
+  AssertEquals('Capacity shrinks to the count', 2, Integer(L.Capacity));
+  AssertEquals('shrinking keeps the items', 'a', L[0]);
+  AssertEquals('shrinking keeps the count', 2, Integer(L.Count));
+
+  L.Add('c');
+  AssertTrue('Add still grows past a manual capacity', L.Capacity >= 3);
+  AssertEquals('the appended item survives', 'c', L[2]);
+end;
+
+procedure TStrListTests.TestForEachEnumerator;
+var
+  L: TStrList;
+  S, Joined: string;
+  Visits: NativeInt;
+begin
+  L.Init;
+  L.Add('a');
+  L.Add('b');
+  L.Add('c');
+
+  Joined := '';
+  Visits := 0;
+  for S in L do
+  begin
+    Joined := Joined + S;
+    Inc(Visits);
+  end;
+  AssertEquals('for-in visits every item once', 3, Integer(Visits));
+  AssertEquals('for-in yields the items in order', 'abc', Joined);
+
+  L.Clear;
+  Visits := 0;
+  for S in L do
+    Inc(Visits);
+  AssertEquals('for-in over an empty list visits nothing', 0, Integer(Visits));
 end;
 
 { ------------------------------------------------------------------- }
