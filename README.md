@@ -133,6 +133,27 @@ fpc @lightstrings.cfg tests/test_benchmark.pas -FU/tmp/ls-build -FE/tmp/ls-build
 /tmp/ls-build/test_benchmark
 ```
 
+**Example Results**
+```bash
+=== LightStrings vs TStringList Benchmark ===
+
+Benchmark                                  | LightStrings |  TStringList | Result         
+-------------------------------------------+--------------+--------------+----------------
+1. Add (2,000,000 items)                   |      27.0 ms |      81.0 ms | 3.00x faster   
+2. IndexOf (2M items, 1000 searches)       |       1.0 ms |      12.0 ms | 12.00x faster  
+3. Sort (2M items; byte vs CompareText)    |    1320.0 ms |    3017.0 ms | 2.29x faster   
+4. NaturalSort vs CustomSort (2M items)    |    4299.0 ms |    5979.0 ms | 1.39x faster   
+5. Text (2,000,000 items)                  |      48.0 ms |      52.0 ms | 1.08x faster   
+6. CommaText (2,000,000 items)             |      86.0 ms |     609.0 ms | 7.08x faster   
+7. Name/Value (2M items, 100 lookups)      |    1264.0 ms |    8394.0 ms | 6.64x faster   
+8. File I/O (80,000 items)                 |      13.0 ms |     309.0 ms | 23.77x faster  
+9. TBuildStr vs TStringList.Text (2M)      |     269.0 ms |     334.0 ms | 1.24x faster   
+10. TStringView vs Copy+Pos (2M x 24)      |      35.0 ms |    1273.0 ms | 36.37x faster  
+-------------------------------------------+--------------+--------------+----------------
+Total                                      |    7362.0 ms |   20050.0 ms | 2.72x faster   
+
+```
+
 `tests/regression.pas` is the self-checking program for the memory-safety and
 semantic fixes; build it with `-gh` so the heap trace covers them too:
 
