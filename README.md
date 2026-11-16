@@ -147,18 +147,19 @@ fpc @lightstrings.cfg tests/test_benchmark.pas -FU/tmp/ls-build -FE/tmp/ls-build
 
 Benchmark                                  | LightStrings |  TStringList | Result         
 -------------------------------------------+--------------+--------------+----------------
-1. Add (2,000,000 items)                   |      31.0 ms |      87.0 ms | 2.81x faster   
-2. IndexOf (2M items, 1000 searches)       |       2.0 ms |      11.0 ms | 5.50x faster   
-3. Sort (2M items; byte vs CompareText)    |    1406.0 ms |    2821.0 ms | 2.01x faster   
-4. NaturalSort vs CustomSort (2M items)    |   10562.0 ms |   11656.0 ms | 1.10x faster   
-5. Text (2,000,000 items)                  |      65.0 ms |      50.0 ms | 1.30x slower   
-6. CommaText (2,000,000 items)             |     150.0 ms |     617.0 ms | 4.11x faster   
-7. Name/Value (2M items, 100 lookups)      |    1432.0 ms |    8815.0 ms | 6.16x faster   
-8. File I/O (80,000 items)                 |      16.0 ms |     313.0 ms | 19.56x faster  
-9. TBuildStr vs TStringList.Text (2M)      |     168.0 ms |     329.0 ms | 1.96x faster   
-10. TStringView vs Copy+Pos (2M x 24)      |      47.0 ms |    1282.0 ms | 27.28x faster  
+1. Add (2,000,000 items)                   |      28.0 ms |      82.0 ms | 2.93x faster   
+2. IndexOf (2M items, 1000 searches)       |       1.0 ms |      13.0 ms | 13.00x faster  
+3. Sort (2M items; byte vs CompareText)    |    1263.0 ms |    2995.0 ms | 2.37x faster   
+4. NaturalSort vs CustomSort (2M items)    |    4392.0 ms |    5982.0 ms | 1.36x faster   
+5. Text (2,000,000 items)                  |      51.0 ms |      52.0 ms | 1.02x faster   
+6. CommaText (2,000,000 items)             |      81.0 ms |     615.0 ms | 7.59x faster   
+7. Name/Value (2M items, 100 lookups)      |    1256.0 ms |    8431.0 ms | 6.71x faster   
+8. File I/O (80,000 items)                 |      11.0 ms |     307.0 ms | 27.91x faster  
+9. TBuildStr vs TStringList.Text (2M)      |     138.0 ms |     326.0 ms | 2.36x faster   
+10. TStringView vs Copy+Pos (2M x 24)      |      37.0 ms |    1252.0 ms | 33.84x faster  
 -------------------------------------------+--------------+--------------+----------------
-Total                                      |   13879.0 ms |   25981.0 ms | 1.87x faster
+Total                                      |    7258.0 ms |   20055.0 ms | 2.76x faster   
+
 ```
 
 `tests/regression.pas` is the self-checking program for the memory-safety and
