@@ -9,8 +9,8 @@ program testrunner;
 {$mode objfpc}{$H+}
 
 uses
-  consoletestrunner, fpcunit,
-  TestLightStrings;
+  consoletestrunner, fpcunit
+  ,TestLightStrings;
 
 type
   { TLightStringsTestRunner }

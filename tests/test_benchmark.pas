@@ -506,12 +506,60 @@ begin
 end;
 
 { ------------------------------------------------------------------ }
+{  BenchDisplay                                                      }
+{ ------------------------------------------------------------------ }
+
+function FormatRatio(LightMs, StdMs: Double): string;
+begin
+  if LightMs < StdMs then
+    Result := Format('%.2fx faster', [StdMs / LightMs])
+  else if LightMs > StdMs then
+    Result := Format('%.2fx slower', [LightMs / StdMs])
+  else
+    Result := '1.00x (tie)';
+end;
+
+procedure BenchHeader;
+begin
+  WriteLn(Format('%-42s | %12s | %12s | %-15s',
+    ['Benchmark', 'LightStrings', 'TStringList', 'Result']));
+  WriteLn(StringOfChar('-', 43) + '+' +
+          StringOfChar('-', 14) + '+' +
+          StringOfChar('-', 14) + '+' +
+          StringOfChar('-', 16));
+end;
+
+procedure BenchDivider;
+begin
+  WriteLn(StringOfChar('-', 43) + '+' +
+          StringOfChar('-', 14) + '+' +
+          StringOfChar('-', 14) + '+' +
+          StringOfChar('-', 16));
+end;
+
+procedure BenchBegin(const Name: string);
+begin
+  Write(Format('%-42s | ', [Name]));
+  Flush(Output);
+end;
+
+procedure BenchDisplay(Score: TScore);
+var
+  LightStr, StdStr: string;
+begin
+  LightStr := Format('%.1f ms', [Score.LightMs]);
+  StdStr   := Format('%.1f ms', [Score.StdMs]);
+  WriteLn(Format('%12s | %12s | %-15s',
+    [LightStr, StdStr, FormatRatio(Score.LightMs, Score.StdMs)]));
+end;
+
+{ ------------------------------------------------------------------ }
 {  Main                                                               }
 { ------------------------------------------------------------------ }
 const
- size = 2000000;
+  size = 2000000;
 var
-  S: TScore;
+  S, TotalScore: TScore;
 begin
   Randomize;
   TotalLight := 0;
@@ -519,70 +567,71 @@ begin
 
   WriteLn('=== LightStrings vs TStringList Benchmark ===');
   WriteLn;
+  BenchHeader;
 
-  Write('Benchmark 1: Add (2,000,000 items)... ');
+  BenchBegin('1. Add (2,000,000 items)');
   S := BenchmarkAdd(size);
-  WriteLn(Format('LightStrings: %.1f ms | TStringList: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 2: IndexOf (2,000,000 items, 100 searches)... ');
+  BenchBegin('2. IndexOf (2M items, 1000 searches)');
   S := BenchmarkIndexOf(size);
-  WriteLn(Format('LightStrings: %.1f ms | TStringList: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 3: Sort (2,000,000 items; byte order vs CompareText)... ');
+  BenchBegin('3. Sort (2M items; byte vs CompareText)');
   S := BenchmarkSort(size);
-  WriteLn(Format('LightStrings: %.1f ms | TStringList: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 4: NaturalSort vs CustomSort (2,000,000 items)... ');
-  S := BenchmarkNaturalCustomSort(2000000);
-  WriteLn(Format('LightStrings NaturalSort: %.1f ms | TStringList CustomSort+NaturalCompare: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchBegin('4. NaturalSort vs CustomSort (2M items)');
+  S := BenchmarkNaturalCustomSort(size);
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 5: Text (2,000,000 items)... ');
+  BenchBegin('5. Text (2,000,000 items)');
   S := BenchmarkText(size);
-  WriteLn(Format('LightStrings: %.1f ms | TStringList: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 6: CommaText (2,000,000 items)... ');
+  BenchBegin('6. CommaText (2,000,000 items)');
   S := BenchmarkCommaText(size);
-  WriteLn(Format('LightStrings: %.1f ms | TStringList: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 7: Name/Value (2,000,000 items, 100 lookups)... ');
+  BenchBegin('7. Name/Value (2M items, 100 lookups)');
   S := BenchmarkNameValue(size);
-  WriteLn(Format('LightStrings: %.1f ms | TStringList: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 8: File I/O (80,000 items)... ');
+  BenchBegin('8. File I/O (80,000 items)');
   S := BenchmarkFileIO(80000);
-  WriteLn(Format('LightStrings: %.1f ms | TStringList: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 9: TBuildStr vs TStringList.Text (2,000,000 appends)... ');
+  BenchBegin('9. TBuildStr vs TStringList.Text (2M)');
   S := BenchmarkBuilder(size);
-  WriteLn(Format('TBuildStr: %.1f ms | TStringList.Text: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  Write('Benchmark 10: TStringView vs Copy+Pos (2,000,000 lines, 24 fields each)... ');
+  BenchBegin('10. TStringView vs Copy+Pos (2M x 24)');
   S := BenchmarkStringView(size);
-  WriteLn(Format('TStringView: %.1f ms | Copy+Pos: %.1f ms | Ratio: %.2fx', [S.LightMs, S.StdMs, S.LightMs / S.StdMs]));
+  BenchDisplay(S);
   TotalLight += S.LightMs;
   TotalStd += S.StdMs;
 
-  WriteLn;
-  WriteLn('=== Summary ===');
-  WriteLn(Format('LightStrings total: %.1f ms', [TotalLight]));
-  WriteLn(Format('TStringList total: %.1f ms', [TotalStd]));
-  WriteLn(Format('Overall ratio: %.2fx', [TotalLight / TotalStd]));
+  BenchDivider;
+  TotalScore.LightMs := TotalLight;
+  TotalScore.StdMs := TotalStd;
+  BenchBegin('Total');
+  BenchDisplay(TotalScore);
 end.

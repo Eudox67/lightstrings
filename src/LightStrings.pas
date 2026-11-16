@@ -25,6 +25,8 @@ const
 {$ENDIF}
 
 type
+   PStr = ^string;
+
   TBuildStr = record
     FBuffer: PChar;
     FCapacity: NativeInt;
@@ -42,6 +44,7 @@ type
     procedure Init(InitialCapacity: NativeInt = 256); inline;
     procedure Append(const S: string); inline;
     procedure Append(const P: PChar; Len: NativeInt); inline;
+    procedure Append(const C: Char); inline;
     procedure AppendLine(const S: string = ''); inline;
     procedure Chop(N: NativeInt); inline;
     procedure Clear; inline;
@@ -53,6 +56,7 @@ type
     procedure QuickSort(var A: array of string; iLo, iHi: NativeInt);
     procedure NaturalQuickSort(var A: array of string; iLo, iHi: NativeInt);
     function SortedInsertIndex(const S: string): NativeInt;
+    procedure AddSlow(const S: string);
   public
     FItems: array of string;
     FCount: NativeInt;
@@ -133,7 +137,6 @@ type
   private
     FData: PChar;
     FLength: NativeInt;
-    FGuard: string;
 
     function GetChar(Index: NativeInt): Char; inline;
   public
@@ -152,7 +155,7 @@ type
     function trim: TStringView;
     function trimLeft: TStringView;
     function trimRight: TStringView;
-    function splitAtFind(const Sep: string; out Before, After: TStringView): Boolean;
+    function splitAtFind(const Sep: string; out Before, After: TStringView): Boolean; inline;
     function toInt(out Value: Integer): Boolean;
     function toInt64(out Value: Int64): Boolean;
     function toString: string; inline;
@@ -175,6 +178,7 @@ implementation
 {  Helper functions (replacements for SysUtils routines)              }
 { ------------------------------------------------------------------- }
 
+{
 function QuoteStr(const S: string; QuoteChar: Char): string;
 var
   i, j, L, Extra: Integer;
@@ -198,6 +202,50 @@ begin
     Inc(j);
   end;
   Result[j] := QuoteChar;
+end;
+}
+
+procedure AppendQuoted(var Builder: TBuildStr; P: PChar; L: NativeInt; QuoteChar: Char);
+var
+  i, Extra: NativeInt;
+  Dest: PChar;
+begin
+  Extra := 0;
+  for i := 0 to L - 1 do
+    if P[i] = QuoteChar then
+      Inc(Extra);
+
+  if Builder.FLength + L + Extra + 2 > Builder.FCapacity then
+    Builder.Grow(Builder.FLength + L + Extra + 2);
+
+  Dest := @Builder.FBuffer[Builder.FLength];
+  Dest^ := QuoteChar;
+  Inc(Dest);
+
+  if Extra = 0 then
+  begin
+    if L > 0 then
+    begin
+      Move(P^, Dest^, L * SizeOf(Char));
+      Inc(Dest, L);
+    end;
+  end
+  else
+  begin
+    for i := 0 to L - 1 do
+    begin
+      if P[i] = QuoteChar then
+      begin
+        Dest^ := QuoteChar;
+        Inc(Dest);
+      end;
+      Dest^ := P[i];
+      Inc(Dest);
+    end;
+  end;
+
+  Dest^ := QuoteChar;
+  Inc(Builder.FLength, L + Extra + 2);
 end;
 
 function DequoteStr(const S: string; QuoteChar: Char): string;
@@ -338,6 +386,15 @@ begin
   Inc(FLength, Len);
 end;
 
+procedure TBuildStr.Append(const C: Char);
+begin
+  if FLength >= FCapacity then
+    Grow(FLength + 1);
+
+  FBuffer[FLength] := C;
+  Inc(FLength);
+end;
+
 procedure TBuildStr.AppendLine(const S: string);
 begin
   Append(S);
@@ -425,7 +482,7 @@ begin
   Result := Lo;
 end;
 
-procedure TStrList.Add(const S: string);
+procedure TStrList.AddSlow(const S: string);
 var
   Capacity, Index, i: NativeInt;
 begin
@@ -451,6 +508,17 @@ begin
 
   FItems[Index] := S;
   Inc(FCount);
+end;
+
+procedure TStrList.Add(const S: string);
+begin
+  if (not FSorted) and (FCount < System.Length(FItems)) then
+  begin
+    FItems[FCount] := S;
+    Inc(FCount);
+  end
+  else
+    AddSlow(S);
 end;
 
 procedure TStrList.Clear;
@@ -489,31 +557,40 @@ end;
 
 function TStrList.GetText: string;
 var
-  i, TotalLen, L, LBLen: NativeInt;
+  i, ItemCount, TotalLen, L: NativeInt;
+  ItemPtr: PStr;
   P: PChar;
 begin
-  if FCount = 0 then Exit('');
+  ItemCount := FCount;
+  if ItemCount = 0 then Exit('');
 
+  ItemPtr := @FItems[0];
   TotalLen := 0;
-  for i := 0 to FCount - 1 do
-    TotalLen := TotalLen + System.Length(FItems[i]);
+  for i := 0 to Count - 1 do
+    TotalLen := TotalLen + System.Length(ItemPtr[i]);
 
-  LBLen := System.Length(LineEnding);
-  TotalLen := TotalLen + LBLen * FCount;
+  TotalLen := TotalLen + System.Length(LineEnding) * ItemCount;
 
   SetLength(Result, TotalLen);
-  P := PChar(Result);
+  if TotalLen = 0 then Exit;
+  P := PChar(Pointer(Result));
 
-  for i := 0 to FCount - 1 do
+  for i := 0 to Count - 1 do
   begin
-    L := System.Length(FItems[i]);
+    L := System.Length(ItemPtr[i]);
     if L > 0 then
     begin
-      System.Move(PChar(FItems[i])^, P^, L * SizeOf(Char));
+      System.Move(PChar(Pointer(ItemPtr[i]))^, P^, L * SizeOf(Char));
       Inc(P, L);
     end;
-    System.Move(PChar(LineEnding)^, P^, LBLen * SizeOf(Char));
-    Inc(P, LBLen);
+    {$IFDEF WINDOWS}
+    P[0] := #13;
+    P[1] := #10;
+    Inc(P, 2);
+    {$ELSE}
+    P^ := LineEnding;
+    Inc(P);
+    {$ENDIF}
   end;
 end;
 
@@ -524,31 +601,45 @@ end;
 
 function TStrList.GetDelimitedText: string;
 var
-  S: string;
-  i: NativeInt;
+  i, j, L, ItemCount: NativeInt;
+  P: PChar;
+  Delim, C: Char;
+  Strict, NeedsQuote: Boolean;
   Builder: TBuildStr;
 begin
-  if FCount = 0 then Exit('');
+  ItemCount := FCount;
+  if ItemCount = 0 then Exit('');
 
-  Builder.Init(FCount * 64);
+  Delim := FDelimiter;
+  Strict := FStrictDelimiter;
+  Builder.Init(Count * 64);
 
-  for i := 0 to FCount - 1 do
+  for i := 0 to Count - 1 do
   begin
-    if i > 0 then Builder.Append(FDelimiter);
-    S := FItems[i];
+    if i > 0 then Builder.Append(Delim);
 
-    if FStrictDelimiter then
-      // TStrings semantics: with a strict delimiter nothing is quoted (an
-      // item containing the delimiter therefore cannot round-trip).
-      Builder.Append(S)
+    L := System.Length(FItems[i]);
+    P := PChar(Pointer(FItems[i]));
+
+    if Strict then
+      Builder.Append(P, L)
     else
     begin
-      if (System.Pos(FDelimiter, S) > 0) or
-         (System.Pos('"', S) > 0) or
-         (System.Pos(' ', S) > 0) then
-        Builder.Append(QuoteStr(S, '"'))
+      NeedsQuote := False;
+      for j := 0 to L - 1 do
+      begin
+        C := P[j];
+        if (C = Delim) or (C = '"') or (C = ' ') then
+        begin
+          NeedsQuote := True;
+          Break;
+        end;
+      end;
+
+      if NeedsQuote then
+        AppendQuoted(Builder, P, L, '"')
       else
-        Builder.Append(S);
+        Builder.Append(P, L);
     end;
   end;
 
@@ -692,19 +783,21 @@ end;
 procedure TStrList.QuickSort(var A: array of string; iLo, iHi: NativeInt);
 var
   Lo, Hi: NativeInt;
-  Pivot, Temp: string;
+  ItemPtr: PStr;
+  PivotPtr, TempPtr: Pointer;
 begin
+  ItemPtr := PStr(@A[0]);
   Lo := iLo;
   Hi := iHi;
-  Pivot := A[(Lo + Hi) div 2];
+  PivotPtr := Pointer(ItemPtr[(Lo + Hi) shr 1]);
   repeat
-    while A[Lo] < Pivot do Inc(Lo);
-    while A[Hi] > Pivot do Dec(Hi);
+    while ItemPtr[Lo] < PStr(@PivotPtr)^ do Inc(Lo);
+    while ItemPtr[Hi] > PStr(@PivotPtr)^ do Dec(Hi);
     if Lo <= Hi then
     begin
-      Temp := A[Lo];
-      A[Lo] := A[Hi];
-      A[Hi] := Temp;
+      TempPtr := PPointer(ItemPtr)[Lo];
+      PPointer(ItemPtr)[Lo] := PPointer(ItemPtr)[Hi];
+      PPointer(ItemPtr)[Hi] := TempPtr;
       Inc(Lo);
       Dec(Hi);
     end;
@@ -717,19 +810,21 @@ end;
 procedure TStrList.NaturalQuickSort(var A: array of string; iLo, iHi: NativeInt);
 var
   Lo, Hi: NativeInt;
-  Pivot, Temp: string;
+  ItemPtr: PStr;
+  PivotPtr, TempPtr: Pointer;
 begin
+  ItemPtr := PStr(@A[0]);
   Lo := iLo;
   Hi := iHi;
-  Pivot := A[(Lo + Hi) div 2];
+  PivotPtr := Pointer(ItemPtr[(Lo + Hi) shr 1]);
   repeat
-    while NaturalCompareText(A[Lo], Pivot) < 0 do Inc(Lo);
-    while NaturalCompareText(A[Hi], Pivot) > 0 do Dec(Hi);
+    while NaturalCompareText(ItemPtr[Lo], PStr(@PivotPtr)^) < 0 do Inc(Lo);
+    while NaturalCompareText(ItemPtr[Hi], PStr(@PivotPtr)^) > 0 do Dec(Hi);
     if Lo <= Hi then
     begin
-      Temp := A[Lo];
-      A[Lo] := A[Hi];
-      A[Hi] := Temp;
+      TempPtr := PPointer(ItemPtr)[Lo];
+      PPointer(ItemPtr)[Lo] := PPointer(ItemPtr)[Hi];
+      PPointer(ItemPtr)[Hi] := TempPtr;
       Inc(Lo);
       Dec(Hi);
     end;
@@ -738,6 +833,7 @@ begin
   if Hi > iLo then NaturalQuickSort(A, iLo, Hi);
   if Lo < iHi then NaturalQuickSort(A, Lo, iHi);
 end;
+
 
 procedure TStrList.Sort;
 begin
@@ -759,17 +855,22 @@ end;
 procedure TStrList.Reverse;
 var
   i, j: NativeInt;
-  Temp: string;
+  Ptrs: PPointer;
+  TempPtr: Pointer;
 begin
-  i := 0;
-  j := FCount - 1;
-  while i < j do
+  if FCount > 1 then
   begin
-    Temp := FItems[i];
-    FItems[i] := FItems[j];
-    FItems[j] := Temp;
-    Inc(i);
-    Dec(j);
+    Ptrs := PPointer(@FItems[0]);
+    i := 0;
+    j := FCount - 1;
+    while i < j do
+    begin
+      TempPtr := Ptrs[i];
+      Ptrs[i] := Ptrs[j];
+      Ptrs[j] := TempPtr;
+      Inc(i);
+      Dec(j);
+    end;
   end;
   // Descending order is not the ordering Find relies on.
   FSorted := False;
@@ -777,10 +878,40 @@ end;
 
 function TStrList.IndexOf(const S: string): NativeInt;
 var
-  i: NativeInt;
+  i, ItemCount, SL, ByteLen: NativeInt;
+  ItemPtr: PStr;
+  SPtr, ItemP: PChar;
+  FirstChar: Char;
 begin
-  for i := 0 to FCount - 1 do
-    if FItems[i] = S then Exit(i);
+  ItemCount := FCount;
+  if ItemCount = 0 then Exit(-1);
+
+  ItemPtr := @FItems[0];
+  SL := System.Length(S);
+
+  if SL = 0 then
+  begin
+    for i := 0 to ItemCount - 1 do
+      if System.Length(ItemPtr[i]) = 0 then
+        Exit(i);
+    Exit(-1);
+  end;
+
+  SPtr := PChar(Pointer(S));
+  FirstChar := SPtr^;
+  ByteLen := SL * SizeOf(Char);
+
+  for i := 0 to ItemCount - 1 do
+  begin
+    if System.Length(ItemPtr[i]) = SL then
+    begin
+      ItemP := PChar(Pointer(ItemPtr[i]));
+      if (ItemP = SPtr) or
+         ((ItemP^ = FirstChar) and (CompareByte(ItemP^, SPtr^, ByteLen) = 0)) then
+        Exit(i);
+    end;
+  end;
+
   Result := -1;
 end;
 
@@ -973,43 +1104,25 @@ procedure TStrList.SaveToFile(const FileName: string);
 var
   F: File;
   Buf: string;
-  i, TotalLen, L, LBLen: NativeInt;
-  P: PChar;
+  TotalBytes, Offset: NativeInt;
+  Chunk: LongInt;
 begin
-  if FCount = 0 then
-  begin
-    Assign(F, FileName);
-    Rewrite(F, 1);
-    Close(F);
-    Exit;
-  end;
-
-  TotalLen := 0;
-  for i := 0 to FCount - 1 do
-    TotalLen := TotalLen + System.Length(FItems[i]);
-
-  LBLen := System.Length(LineEnding);
-  TotalLen := TotalLen + FCount * LBLen;
-
-  SetLength(Buf, TotalLen);
-  P := PChar(Buf);
-
-  for i := 0 to FCount - 1 do
-  begin
-    L := System.Length(FItems[i]);
-    if L > 0 then
-    begin
-      System.Move(PChar(FItems[i])^, P^, L * SizeOf(Char));
-      Inc(P, L);
-    end;
-    System.Move(PChar(LineEnding)^, P^, LBLen * SizeOf(Char));
-    Inc(P, LBLen);
-  end;
+  Buf := GetText;
+  TotalBytes := System.Length(Buf) * SizeOf(Char);
 
   Assign(F, FileName);
   Rewrite(F, 1);
   try
-    BlockWrite(F, PChar(Buf)^, TotalLen * SizeOf(Char));
+    Offset := 0;
+    while Offset < TotalBytes do
+    begin
+      if TotalBytes - Offset > High(LongInt) then
+        Chunk := High(LongInt)
+      else
+        Chunk := LongInt(TotalBytes - Offset);
+      BlockWrite(F, PByte(Pointer(Buf))[Offset], Chunk);
+      Inc(Offset, Chunk);
+    end;
   finally
     Close(F);
   end;
@@ -1113,7 +1226,7 @@ class function TStringView.Create(const S: string): TStringView;
 begin
   Result.FData := PChar(S);
   Result.FLength := System.Length(S);
-  Result.FGuard := S;
+//  Result.FGuard := S;
 end;
 
 function TStringView.GetChar(Index: NativeInt): Char;
@@ -1142,6 +1255,7 @@ var
 begin
   L := System.Length(S);
   if L > FLength then Exit(False);
+  if L = 0 then Exit(True);
   Result := CompareByte(FData^, PChar(S)^, L * SizeOf(Char)) = 0;
 end;
 
@@ -1156,6 +1270,7 @@ var
 begin
   L := System.Length(S);
   if L > FLength then Exit(False);
+  if L = 0 then Exit(True);
   Result := CompareByte(FData[FLength - L], PChar(S)^, L * SizeOf(Char)) = 0;
 end;
 
@@ -1185,7 +1300,7 @@ var
 begin
   Result.FData := nil;
   Result.FLength := 0;
-  Result.FGuard := FGuard;
+//  Result.FGuard := FGuard;
 
   SL := System.Length(S);
   if SL = 0 then
@@ -1215,8 +1330,6 @@ function TStringView.trim: TStringView;
 var
   Lo, Hi: NativeInt;
 begin
-  Result.FGuard := FGuard;
-
   Lo := 0;
   while (Lo < FLength) and IsSpace(FData[Lo]) do Inc(Lo);
   Hi := FLength - 1;
@@ -1238,8 +1351,6 @@ function TStringView.trimLeft: TStringView;
 var
   Lo: NativeInt;
 begin
-  Result.FGuard := FGuard;
-
   Lo := 0;
   while (Lo < FLength) and IsSpace(FData[Lo]) do Inc(Lo);
 
@@ -1259,8 +1370,6 @@ function TStringView.trimRight: TStringView;
 var
   Hi: NativeInt;
 begin
-  Result.FGuard := FGuard;
-
   Hi := FLength - 1;
   while (Hi >= 0) and IsSpace(FData[Hi]) do Dec(Hi);
 
@@ -1271,10 +1380,11 @@ end;
 function TStringView.splitAtFind(const Sep: string; out Before, After: TStringView): Boolean;
 var
   SepLen, i, MaxI: NativeInt;
+  {$IF SizeOf(Char) = 1}
+  Idx, Offset: SizeInt;
+  FirstByte: Byte;
+  {$ENDIF}
 begin
-  Before.FGuard := FGuard;
-  After.FGuard := FGuard;
-
   SepLen := System.Length(Sep);
   if SepLen = 0 then
   begin
@@ -1284,23 +1394,69 @@ begin
     Exit(True);
   end;
 
+  if FLength < SepLen then
+  begin
+    Before := Self;
+    After.FData := nil;
+    After.FLength := 0;
+    Exit(False);
+  end;
+
+  {$IF SizeOf(Char) = 1}
+  if SepLen = 1 then
+  begin
+    Idx := System.IndexByte(FData^, FLength, Byte(Sep[1]));
+    if Idx >= 0 then
+    begin
+      Before.FData := FData;
+      Before.FLength := Idx;
+      After.FData := @FData[Idx + 1];
+      After.FLength := FLength - Idx - 1;
+      Exit(True);
+    end;
+    Before := Self;
+    After.FData := nil;
+    After.FLength := 0;
+    Exit(False);
+  end;
+
+  i := 0;
   MaxI := FLength - SepLen;
-  for i := 0 to MaxI do
-    if CompareByte(FData[i], PChar(Sep)^, SepLen * SizeOf(Char)) = 0 then
+  FirstByte := Byte(Sep[1]);
+  while i <= MaxI do
+  begin
+    Offset := System.IndexByte(FData[i], MaxI - i + 1, FirstByte);
+    if Offset < 0 then Break;
+    Inc(i, Offset);
+    if CompareByte(FData[i], PChar(Pointer(Sep))^, SepLen) = 0 then
     begin
       Before.FData := FData;
       Before.FLength := i;
-
       After.FData := @FData[i + SepLen];
       After.FLength := FLength - i - SepLen;
       Exit(True);
     end;
+    Inc(i);
+  end;
+  {$ELSE}
+  MaxI := FLength - SepLen;
+  for i := 0 to MaxI do
+    if CompareByte(FData[i], PChar(Pointer(Sep))^, SepLen * SizeOf(Char)) = 0 then
+    begin
+      Before.FData := FData;
+      Before.FLength := i;
+      After.FData := @FData[i + SepLen];
+      After.FLength := FLength - i - SepLen;
+      Exit(True);
+    end;
+  {$ENDIF}
 
   Before := Self;
   After.FData := nil;
   After.FLength := 0;
   Result := False;
 end;
+
 
 function TStringView.toInt(out Value: Integer): Boolean;
 var
@@ -1410,15 +1566,11 @@ function TStringView.toString: string;
 begin
   SetLength(Result, FLength);
   if FLength > 0 then
-    Move(FData^, Result[1], FLength * SizeOf(Char));
+    Move(FData^, PChar(Pointer(Result))^, FLength * SizeOf(Char));
 end;
 
 function TStringView.slice(Start: NativeInt; Count: NativeInt): TStringView;
 begin
-  Result.FGuard := FGuard;
-
-  // Clamp instead of pointing outside the buffer (negative offsets used to
-  // read whatever happened to precede the string).
   if Count < 0 then Count := 0;
   if Start < 0 then
   begin
