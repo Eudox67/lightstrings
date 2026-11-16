@@ -6,7 +6,7 @@
 // ###########################################################
 program regression;
 
-{ Regression checks for the defects fixed after the 1.0.0 review.
+{ Regression checks for the defects fixed after testing.
 
   Build with heaptrc as well, so the memory fixes are covered too:
     fpc @lightstrings.cfg -gh tests/regression.pas -FU/tmp/reg -FE/tmp/reg
