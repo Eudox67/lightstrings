@@ -363,6 +363,12 @@ begin
   L.DelimitedText := 'a,"b c",d';
   AssertEquals('DelimitedText parses quoted fields', 3, Integer(L.Count));
   AssertEquals('quoted field is dequoted', 'b c', L[1]);
+
+  L.Delimiter := ';';
+  L.StrictDelimiter := True;
+  L.DelimitedText := 'a;b;c';
+  AssertEquals('CommaText always uses commas', 'a,b,c', L.CommaText);
+  AssertEquals('CommaText leaves Delimiter alone', ';', L.Delimiter);
 end;
 
 procedure TStrListTests.TestNameValue;

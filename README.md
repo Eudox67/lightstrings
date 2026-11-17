@@ -16,6 +16,11 @@ released automatically through FPC's management operators.
 
 No external dependencies: both units use only the implicit `System` unit.
 
+New here? **[USAGE.md](USAGE.md)** shows `TStringList` and `TStringBuilder`
+code next to the equivalent LightStrings code — most of the time only the
+declaration changes, and the `Create`/`try`/`finally`/`Free` ceremony
+disappears.
+
 Works with the plain Free Pascal compiler (CLI) and with Lazarus — no external
 build tool.
 
@@ -195,6 +200,7 @@ LightStrings/
 ├── lightstrings.cfg        # Tier 2: FPC response file
 ├── lightstrings_pkg.lpk    # Tier 3: Lazarus package
 ├── README.md
+├── USAGE.md                # side-by-side TStringList/TStringBuilder guide
 ├── LICENSE                 # MIT
 └── .gitignore
 ```

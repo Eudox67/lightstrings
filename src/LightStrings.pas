@@ -784,8 +784,15 @@ begin
 end;
 
 function TStrList.GetCommaText: string;
+var
+  SavedDelim: Char;
 begin
+  // CommaText always uses ',', regardless of Delimiter (as TStrings does);
+  // mirror the temporary switch SetCommaText already performs.
+  SavedDelim := FDelimiter;
+  FDelimiter := ',';
   Result := GetDelimitedText;
+  FDelimiter := SavedDelim;
 end;
 
 function TStrList.GetDelimitedText: string;

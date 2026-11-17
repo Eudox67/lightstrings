@@ -197,6 +197,13 @@ begin
   L.Add('a b');
   L.StrictDelimiter := False;
   Check('non-strict quotes when needed', L.DelimitedText = '"a b"');
+
+  { GetCommaText used to honour a custom Delimiter; TStrings always uses ','. }
+  L.Init;
+  L.Add('a');
+  L.Add('b');
+  L.Delimiter := ';';
+  Check('CommaText ignores a custom delimiter', L.CommaText = 'a,b');
 end;
 
 procedure TestViewBounds;
